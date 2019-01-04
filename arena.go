@@ -18,20 +18,32 @@ type ArenaStats struct {
 	RequestedSize int
 }
 
-func NewArena(totalSize int) *Arena {
+func NewArena(buf []byte) *Arena {
+	totalSize := len(buf)
 	if totalSize <= 0 {
 		return nil
 	}
 	if totalSize != 1<<uint(highbit(totalSize)-1) {
-		panic(ErrPowerOfTwo)
+		panic(ErrSizeMustBePowerOfTwo)
 	}
 	a := &Arena{
-		buf:      make([]byte, totalSize),
+		buf:      buf,
 		freeList: make(map[int]int),
 	}
 	a.freeList[0] = totalSize
 	a.stats.TotalSize = totalSize
 	return a
+}
+
+func AllocArena(totalSize int) *Arena {
+	if totalSize <= 0 {
+		return nil
+	}
+	if totalSize != 1<<uint(highbit(totalSize)-1) {
+		panic(ErrSizeMustBePowerOfTwo)
+	}
+	buf := make([]byte, totalSize)
+	return NewArena(buf)
 }
 
 func (a *Arena) Alloc(size int) []byte {
@@ -78,16 +90,16 @@ func (a *Arena) Alloc(size int) []byte {
 }
 
 func (a *Arena) Free(ptr []byte) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
 	ptrSize := len(ptr)
 	if ptrSize <= 0 {
 		return
 	}
 	ptrOffset := int(uintptr(unsafe.Pointer(&ptr[0])) - uintptr(unsafe.Pointer(&a.buf[0])))
-	if ptrOffset >= len(a.buf) {
+	if ptrOffset < 0 || ptrOffset >= len(a.buf) {
 		return
 	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	ptrHigh := highbit(ptrSize - 1)
 	ptrLength := 1 << uint(ptrHigh)
 	offset := ptrOffset
