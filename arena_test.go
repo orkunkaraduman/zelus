@@ -9,16 +9,16 @@ import (
 func TestArena(t *testing.T) {
 	r := rand.New(rand.NewSource(time.Now().Unix()))
 	size := 256 * 1024 * 1024
-	maxChunkSize := 256 * 1024
+	maxChunkSize := 500 * 1024
 	a := NewArena(size)
 	ptrList := make(map[int][]byte)
 	allocated := 0
 	i := 0
-	for allocated < size*70/100 {
+	for allocated < size*60/100 {
 		l := r.Intn(maxChunkSize)
 		p := a.Alloc(l)
 		if p == nil {
-			t.Error("Cannot allocate")
+			t.Errorf("Cannot allocate %d", i)
 			t.FailNow()
 		}
 		ptrList[i] = p

@@ -7,13 +7,19 @@ import (
 
 type Arena struct {
 	mu       sync.Mutex
-	buff     []byte
+	buf      []byte
 	freeList map[int]int
 }
 
 func NewArena(cap int) *Arena {
+	if cap <= 0 {
+		return nil
+	}
+	if cap != 1<<uint(highbit(cap)-1) {
+		panic(ErrPowerOfTwo)
+	}
 	a := &Arena{
-		buff:     make([]byte, cap),
+		buf:      make([]byte, cap),
 		freeList: make(map[int]int),
 	}
 	a.freeList[0] = cap
@@ -50,7 +56,6 @@ func (a *Arena) Alloc(size int) []byte {
 			length = l
 		}
 		a.freeList[offset] = length
-		//fmt.Println("write:", offset, length)
 		if length >= size {
 			foundOffset = offset
 		}
@@ -59,8 +64,7 @@ func (a *Arena) Alloc(size int) []byte {
 	offset = foundOffset
 	length = a.freeList[offset]
 	delete(a.freeList, offset)
-	//fmt.Println("found:", offset, length)
-	return a.buff[offset : offset+size]
+	return a.buf[offset : offset+size]
 }
 
 func (a *Arena) Free(ptr []byte) {
@@ -70,18 +74,15 @@ func (a *Arena) Free(ptr []byte) {
 	if ptrSize <= 0 {
 		return
 	}
-	ptrOffset := int(uintptr(unsafe.Pointer(&ptr[0])) - uintptr(unsafe.Pointer(&a.buff[0])))
-	if ptrOffset >= len(a.buff) {
+	ptrOffset := int(uintptr(unsafe.Pointer(&ptr[0])) - uintptr(unsafe.Pointer(&a.buf[0])))
+	if ptrOffset >= len(a.buf) {
 		return
 	}
 	ptrHigh := highbit(ptrSize - 1)
 	ptrLength := 1 << uint(ptrHigh)
 	offset := ptrOffset
 	length := ptrLength
-
 	a.freeList[offset] = length
-	//fmt.Println("lwrite:", offset, length)
-
 	b := true
 	for b {
 		b = false
@@ -91,7 +92,6 @@ func (a *Arena) Free(ptr []byte) {
 				delete(a.freeList, n)
 				length *= 2
 				a.freeList[offset] = length
-				//fmt.Println("fwrite:", offset, length)
 				b = true
 			}
 		} else {
@@ -101,7 +101,6 @@ func (a *Arena) Free(ptr []byte) {
 				offset = n
 				length *= 2
 				a.freeList[offset] = length
-				//fmt.Println("rwrite:", offset, length)
 				b = true
 			}
 		}
