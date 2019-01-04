@@ -9,19 +9,18 @@ import (
 func TestArena(t *testing.T) {
 	r := rand.New(rand.NewSource(time.Now().Unix()))
 	size := 256 * 1024 * 1024
-	maxChunkSize := 500 * 1024
 	a := AllocArena(size)
 	ptrList := make(map[int][]byte)
 	requested := 0
 	i := 0
 	for requested < size*60/100 {
-		l := r.Intn(maxChunkSize)
-		p := a.Alloc(l)
-		if p == nil {
+		l := r.Intn(500 * 1024)
+		ptr := a.Alloc(l)
+		if ptr == nil {
 			t.Errorf("Cannot allocate %d", i)
 			t.FailNow()
 		}
-		ptrList[i] = p
+		ptrList[i] = ptr
 		requested += l
 		i++
 	}
@@ -30,8 +29,8 @@ func TestArena(t *testing.T) {
 		t.Error("Stats error")
 		t.FailNow()
 	}
-	for _, p := range ptrList {
-		a.Free(p)
+	for _, ptr := range ptrList {
+		a.Free(ptr)
 	}
 	if len(a.freeList) != 1 {
 		t.Error("Freelist length error")
