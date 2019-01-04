@@ -9,20 +9,28 @@ type Arena struct {
 	mu       sync.Mutex
 	buf      []byte
 	freeList map[int]int
+	stats    ArenaStats
 }
 
-func NewArena(cap int) *Arena {
-	if cap <= 0 {
+type ArenaStats struct {
+	TotalSize     int
+	AllocatedSize int
+	RequestedSize int
+}
+
+func NewArena(totalSize int) *Arena {
+	if totalSize <= 0 {
 		return nil
 	}
-	if cap != 1<<uint(highbit(cap)-1) {
+	if totalSize != 1<<uint(highbit(totalSize)-1) {
 		panic(ErrPowerOfTwo)
 	}
 	a := &Arena{
-		buf:      make([]byte, cap),
+		buf:      make([]byte, totalSize),
 		freeList: make(map[int]int),
 	}
-	a.freeList[0] = cap
+	a.freeList[0] = totalSize
+	a.stats.TotalSize = totalSize
 	return a
 }
 
@@ -64,6 +72,8 @@ func (a *Arena) Alloc(size int) []byte {
 	offset = foundOffset
 	length = a.freeList[offset]
 	delete(a.freeList, offset)
+	a.stats.AllocatedSize += length
+	a.stats.RequestedSize += size
 	return a.buf[offset : offset+size]
 }
 
@@ -105,4 +115,12 @@ func (a *Arena) Free(ptr []byte) {
 			}
 		}
 	}
+	a.stats.AllocatedSize -= ptrLength
+	a.stats.RequestedSize -= ptrSize
+}
+
+func (a *Arena) Stats() ArenaStats {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.stats
 }
