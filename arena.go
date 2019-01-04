@@ -78,36 +78,32 @@ func (a *Arena) Free(ptr []byte) {
 	ptrLength := 1 << uint(ptrHigh)
 	offset := ptrOffset
 	length := ptrLength
-	firstOffset := offset
-	for {
-		freed := false
-		offset = firstOffset + length
-		if l, ok := a.freeList[offset]; ok {
-			if l == length {
-				delete(a.freeList, offset)
+
+	a.freeList[offset] = length
+	//fmt.Println("lwrite:", offset, length)
+
+	b := true
+	for b {
+		b = false
+		if (offset/length)%2 == 0 {
+			n := offset + length
+			if l, ok := a.freeList[n]; ok && l == length {
+				delete(a.freeList, n)
 				length *= 2
-				a.freeList[firstOffset] = length
-				//fmt.Println("fwrite:", firstOffset, length)
-				freed = true
+				a.freeList[offset] = length
+				//fmt.Println("fwrite:", offset, length)
+				b = true
 			}
-		}
-		offset = firstOffset - length
-		if l, ok := a.freeList[offset]; ok {
-			if l == length {
-				delete(a.freeList, firstOffset)
+		} else {
+			n := offset - length
+			if l, ok := a.freeList[n]; ok && l == length {
+				delete(a.freeList, offset)
+				offset = n
 				length *= 2
 				a.freeList[offset] = length
 				//fmt.Println("rwrite:", offset, length)
-				freed = true
-				firstOffset = offset
+				b = true
 			}
-		}
-		if !freed {
-			if firstOffset == ptrOffset {
-				a.freeList[firstOffset] = length
-				//fmt.Println("lwrite:", firstOffset, length)
-			}
-			break
 		}
 	}
 }
