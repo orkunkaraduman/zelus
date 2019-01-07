@@ -1,3 +1,3 @@
-# go-malloc
+# zelus
 
 Developing :)
