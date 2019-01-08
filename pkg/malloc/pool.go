@@ -6,7 +6,7 @@ import (
 )
 
 type Pool struct {
-	mu     sync.Mutex
+	mu     sync.RWMutex
 	arenas []*Arena
 	stats  PoolStats
 }
@@ -48,7 +48,7 @@ func (p *Pool) Grow(n int) {
 }
 
 func (p *Pool) alloc(size int, block bool) []byte {
-	p.mu.Lock()
+	p.mu.RLock()
 	var ptr []byte
 	for _, a := range p.arenas {
 		ptr = a.alloc(size, block)
@@ -58,7 +58,7 @@ func (p *Pool) alloc(size int, block bool) []byte {
 			break
 		}
 	}
-	p.mu.Unlock()
+	p.mu.RUnlock()
 	return ptr
 }
 
@@ -74,7 +74,7 @@ func (p *Pool) Free(ptr []byte) {
 	if ptr == nil {
 		return
 	}
-	p.mu.Lock()
+	p.mu.RLock()
 	for _, a := range p.arenas {
 		if uintptr(unsafe.Pointer(&ptr[0])) >= uintptr(unsafe.Pointer(&a.buf[0])) &&
 			uintptr(unsafe.Pointer(&ptr[0])) < uintptr(unsafe.Pointer(&a.buf[0]))+uintptr(len(a.buf)) {
@@ -83,7 +83,7 @@ func (p *Pool) Free(ptr []byte) {
 			p.stats.RequestedSize -= len(ptr)
 		}
 	}
-	p.mu.Unlock()
+	p.mu.RUnlock()
 }
 
 func (p *Pool) Stats() (stats PoolStats) {
