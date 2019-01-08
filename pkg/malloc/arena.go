@@ -2,6 +2,7 @@ package malloc
 
 import (
 	"sync"
+	"unsafe"
 )
 
 type Arena struct {
@@ -77,7 +78,7 @@ func (a *Arena) alloc(size int, block bool) []byte {
 	foundIdx = -1
 	ending := offset + length
 	for offset < ending {
-		if high > sizeHigh && high > 4 {
+		if high > sizeHigh && high > 8 {
 			high--
 			length >>= 1
 		}
@@ -115,7 +116,7 @@ func (a *Arena) AllocBlock(size int) []byte {
 }
 
 func (a *Arena) Free(ptr []byte) {
-	/*ptrSize := len(ptr)
+	ptrSize := len(ptr)
 	if ptrSize <= 0 {
 		return
 	}
@@ -128,32 +129,41 @@ func (a *Arena) Free(ptr []byte) {
 	ptrLength := 1 << uint(ptrHigh)
 	offset := ptrOffset
 	length := ptrLength
-	a.fl[offset] = length
+	high := ptrHigh
+	a.fl.add(high, offset)
 	b := true
 	for b {
 		b = false
 		if (offset/length)%2 == 0 {
 			n := offset + length
-			if l, ok := a.fl[n]; ok && l == length {
-				delete(a.fl, n)
-				length *= 2
-				a.fl[offset] = length
+			idx := a.fl.find(high, n)
+			if idx >= 0 {
+				a.fl.del(high, idx)
+				idx = a.fl.find(high, offset)
+				a.fl.del(high, idx)
+				length <<= 1
+				high++
+				a.fl.add(high, offset)
 				b = true
 			}
 		} else {
 			n := offset - length
-			if l, ok := a.fl[n]; ok && l == length {
-				delete(a.fl, offset)
+			idx := a.fl.find(high, n)
+			if idx >= 0 {
+				a.fl.del(high, idx)
+				idx = a.fl.find(high, offset)
+				a.fl.del(high, idx)
 				offset = n
-				length *= 2
-				a.fl[offset] = length
+				length <<= 1
+				high++
+				a.fl.add(high, offset)
 				b = true
 			}
 		}
 	}
 	a.stats.AllocatedSize -= ptrLength
 	a.stats.RequestedSize -= ptrSize
-	a.mu.Unlock()*/
+	a.mu.Unlock()
 }
 
 func (a *Arena) Stats() (stats ArenaStats) {
