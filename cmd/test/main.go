@@ -4,9 +4,7 @@ package main
 
 import (
 	"fmt"
-	"log"
-	"net/http"
-	_ "net/http/pprof"
+	//_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"runtime"
@@ -37,9 +35,9 @@ func run(st *store.Store, start, stop int) {
 }
 
 func main() {
-	go func() {
+	/*go func() {
 		log.Println(http.ListenAndServe("localhost:6060", nil))
-	}()
+	}()*/
 
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)
