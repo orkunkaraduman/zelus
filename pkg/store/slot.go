@@ -75,10 +75,8 @@ func (nd *node) Alloc(p *malloc.Pool, size int) int {
 	datas := [][]byte(nil)
 	for size > 0 {
 		var ptr []byte
-		l := 1 << uint(malloc.HighBit(size)-1)
-		for l > 0 && ptr == nil {
+		for l := 1 << uint(malloc.HighBit(size)-1); l > 0 && ptr == nil; l >>= 1 {
 			ptr = p.Alloc(l)
-			l >>= 1
 		}
 		if ptr == nil {
 			break
