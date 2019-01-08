@@ -15,6 +15,18 @@ func newFreeList() *freeList {
 	}
 }
 
+func (f *freeList) size() int {
+	r := 0
+	for _, l := range f.list {
+		for _, o := range l {
+			if o >= 0 {
+				r++
+			}
+		}
+	}
+	return r
+}
+
 func (f *freeList) find(h, v int) int {
 	for i, u := range f.list[h] {
 		if u == v {
@@ -43,8 +55,12 @@ func (f *freeList) set(h, i int, v int) {
 
 func (f *freeList) del(h, i int) {
 	f.list[h][i] = -1
+	m := -1
 	for j := len(f.list[h]) - 1; j >= 0 && f.list[h][j] < 0; j-- {
-		f.list[h] = f.list[h][:j]
+		m = j
+	}
+	if m >= 0 {
+		f.list[h] = f.list[h][:m]
 	}
 }
 
