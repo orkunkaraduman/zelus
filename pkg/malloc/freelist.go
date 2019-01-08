@@ -15,49 +15,49 @@ func newFreeList() *freeList {
 	}
 }
 
-func (f *freeList) find(offset, lengthHigh int) int {
-	for i, v := range f.list[lengthHigh] {
-		if v == offset {
+func (f *freeList) find(h, v int) int {
+	for i, u := range f.list[h] {
+		if u == v {
 			return i
 		}
 	}
 	return -1
 }
 
-func (f *freeList) first(lengthHigh int) int {
-	for i, v := range f.list[lengthHigh] {
-		if v >= 0 {
+func (f *freeList) first(h int) int {
+	for i, u := range f.list[h] {
+		if u >= 0 {
 			return i
 		}
 	}
 	return -1
 }
 
-func (f *freeList) get(idx int, lengthHigh int) int {
-	return f.list[lengthHigh][idx]
+func (f *freeList) get(h, i int) int {
+	return f.list[h][i]
 }
 
-func (f *freeList) set(idx int, offset int, lengthHigh int) {
-	f.list[lengthHigh][idx] = offset
+func (f *freeList) set(h, i int, v int) {
+	f.list[h][i] = v
 }
 
-func (f *freeList) del(idx int, lengthHigh int) {
-	f.list[lengthHigh][idx] = -1
-	for i := len(f.list[lengthHigh]) - 1; i >= 0 && f.list[lengthHigh][i] < 0; i-- {
-		f.list[lengthHigh] = f.list[lengthHigh][:i]
+func (f *freeList) del(h, i int) {
+	f.list[h][i] = -1
+	for j := len(f.list[h]) - 1; j >= 0 && f.list[h][j] < 0; j-- {
+		f.list[h] = f.list[h][:j]
 	}
 }
 
-func (f *freeList) append(offset int, lengthHigh int) int {
-	f.list[lengthHigh] = append(f.list[lengthHigh], offset)
-	return len(f.list[lengthHigh]) - 1
+func (f *freeList) append(h int, v int) int {
+	f.list[h] = append(f.list[h], v)
+	return len(f.list[h]) - 1
 }
 
-func (f *freeList) add(offset int, lengthHigh int) int {
-	idx := f.find(-1, lengthHigh)
-	if idx < 0 {
-		return f.append(offset, lengthHigh)
+func (f *freeList) add(h int, v int) int {
+	i := f.find(h, -1)
+	if i < 0 {
+		return f.append(h, v)
 	}
-	f.list[lengthHigh][idx] = offset
-	return idx
+	f.list[h][i] = v
+	return i
 }

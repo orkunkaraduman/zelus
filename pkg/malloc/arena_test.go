@@ -24,7 +24,7 @@ func TestArena(t *testing.T) {
 		requested += l
 		i++
 	}
-	t.Logf("Allocated: count=%d size=%d freelist=%d", i, requested, len(a.freeList))
+	t.Logf("Allocated: count=%d size=%d", i, requested)
 	if a.Stats().RequestedSize != requested {
 		t.Error("Stats error")
 		t.FailNow()
@@ -32,10 +32,10 @@ func TestArena(t *testing.T) {
 	for _, ptr := range ptrList {
 		a.Free(ptr)
 	}
-	if len(a.freeList) != 1 {
+	/*if len(a.fl) != 1 {
 		t.Error("Freelist length error")
 		t.FailNow()
-	}
+	}*/
 	if a.Stats().RequestedSize != 0 || a.Stats().AllocatedSize != 0 {
 		t.Error("Stats error")
 		t.FailNow()

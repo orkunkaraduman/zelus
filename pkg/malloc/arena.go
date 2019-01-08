@@ -2,14 +2,13 @@ package malloc
 
 import (
 	"sync"
-	"unsafe"
 )
 
 type Arena struct {
-	mu       sync.Mutex
-	buf      []byte
-	freeList map[int]int
-	stats    ArenaStats
+	mu    sync.Mutex
+	buf   []byte
+	fl    *freeList
+	stats ArenaStats
 }
 
 type ArenaStats struct {
@@ -23,14 +22,15 @@ func NewArena(buf []byte) *Arena {
 	if totalSize <= 0 {
 		return nil
 	}
-	if totalSize != 1<<uint(HighBit(totalSize)-1) {
+	h := HighBit(totalSize - 1)
+	if totalSize != 1<<uint(h) {
 		panic(ErrSizeMustBePowerOfTwo)
 	}
 	a := &Arena{
-		buf:      buf,
-		freeList: make(map[int]int),
+		buf: buf,
+		fl:  newFreeList(),
 	}
-	a.freeList[0] = totalSize
+	a.fl.add(h, 0)
 	a.stats.TotalSize = totalSize
 	return a
 }
@@ -54,11 +54,15 @@ func (a *Arena) alloc(size int, block bool) []byte {
 		return nil
 	}
 	a.mu.Lock()
-	offset, length := -1, int(^uint(0)>>1)
-	for k, v := range a.freeList {
-		if v >= size && v < length && k > offset {
-			offset = k
-			length = v
+	sizeHigh := HighBit(size - 1)
+	offset, length, high, idx := -1, int(^uint(0)>>1), -1, -1
+	for h := HighBit(length - 1); h >= sizeHigh; h-- {
+		i := a.fl.first(h)
+		if i >= 0 {
+			offset = a.fl.get(h, i)
+			length = 1 << uint(h)
+			high = h
+			idx = i
 		}
 	}
 	if offset < 0 {
@@ -66,27 +70,31 @@ func (a *Arena) alloc(size int, block bool) []byte {
 		return nil
 	}
 	foundOffset := offset
+	foundLength := length
+	foundHigh := high
+	foundIdx := idx
+	a.fl.del(foundHigh, foundIdx)
+	foundIdx = -1
 	ending := offset + length
-	lengthHigh := HighBit(length - 1)
-	sizeHigh := HighBit(size - 1)
 	for offset < ending {
-		if lengthHigh > sizeHigh && lengthHigh > 4 {
-			lengthHigh--
-			length = 1 << uint(lengthHigh)
+		if high > sizeHigh && high > 4 {
+			high--
+			length >>= 1
 		}
-		l := ending - offset
-		if l < length {
-			length = l
+		if length < size {
+			break
 		}
-		a.freeList[offset] = length
-		if length >= size {
-			foundOffset = offset
-		}
+		foundOffset = offset
+		foundLength = length
+		foundHigh = high
+		foundIdx = a.fl.add(high, offset)
 		offset += length
 	}
+	if foundIdx >= 0 {
+		a.fl.del(foundHigh, foundIdx)
+	}
 	offset = foundOffset
-	length = a.freeList[offset]
-	delete(a.freeList, offset)
+	length = foundLength
 	a.stats.AllocatedSize += length
 	if block {
 		a.stats.RequestedSize += length
@@ -107,7 +115,7 @@ func (a *Arena) AllocBlock(size int) []byte {
 }
 
 func (a *Arena) Free(ptr []byte) {
-	ptrSize := len(ptr)
+	/*ptrSize := len(ptr)
 	if ptrSize <= 0 {
 		return
 	}
@@ -120,32 +128,32 @@ func (a *Arena) Free(ptr []byte) {
 	ptrLength := 1 << uint(ptrHigh)
 	offset := ptrOffset
 	length := ptrLength
-	a.freeList[offset] = length
+	a.fl[offset] = length
 	b := true
 	for b {
 		b = false
 		if (offset/length)%2 == 0 {
 			n := offset + length
-			if l, ok := a.freeList[n]; ok && l == length {
-				delete(a.freeList, n)
+			if l, ok := a.fl[n]; ok && l == length {
+				delete(a.fl, n)
 				length *= 2
-				a.freeList[offset] = length
+				a.fl[offset] = length
 				b = true
 			}
 		} else {
 			n := offset - length
-			if l, ok := a.freeList[n]; ok && l == length {
-				delete(a.freeList, offset)
+			if l, ok := a.fl[n]; ok && l == length {
+				delete(a.fl, offset)
 				offset = n
 				length *= 2
-				a.freeList[offset] = length
+				a.fl[offset] = length
 				b = true
 			}
 		}
 	}
 	a.stats.AllocatedSize -= ptrLength
 	a.stats.RequestedSize -= ptrSize
-	a.mu.Unlock()
+	a.mu.Unlock()*/
 }
 
 func (a *Arena) Stats() (stats ArenaStats) {
