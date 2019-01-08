@@ -33,8 +33,10 @@ func (p *Pool) Grow(n int) {
 		panic(ErrSizeMustBePositive)
 	}
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	buf := make([]byte, n)
+	for i := 0; i < len(buf); i++ {
+		buf[i] = 0
+	}
 	offset := 0
 	for offset < n {
 		length := 1 << uint(HighBit(n-offset)-1)
@@ -42,11 +44,11 @@ func (p *Pool) Grow(n int) {
 		offset += length
 	}
 	p.stats.TotalSize += n
+	p.mu.Unlock()
 }
 
 func (p *Pool) alloc(size int, block bool) []byte {
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	var ptr []byte
 	for _, a := range p.arenas {
 		ptr = a.alloc(size, block)
@@ -56,6 +58,7 @@ func (p *Pool) alloc(size int, block bool) []byte {
 			break
 		}
 	}
+	p.mu.Unlock()
 	return ptr
 }
 
@@ -72,7 +75,6 @@ func (p *Pool) Free(ptr []byte) {
 		return
 	}
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	for _, a := range p.arenas {
 		if uintptr(unsafe.Pointer(&ptr[0])) >= uintptr(unsafe.Pointer(&a.buf[0])) &&
 			uintptr(unsafe.Pointer(&ptr[0])) < uintptr(unsafe.Pointer(&a.buf[0]))+uintptr(len(a.buf)) {
@@ -81,10 +83,12 @@ func (p *Pool) Free(ptr []byte) {
 			p.stats.RequestedSize -= len(ptr)
 		}
 	}
+	p.mu.Unlock()
 }
 
-func (p *Pool) Stats() PoolStats {
+func (p *Pool) Stats() (stats PoolStats) {
 	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.stats
+	stats = p.stats
+	p.mu.Unlock()
+	return
 }

@@ -43,6 +43,9 @@ func AllocArena(totalSize int) *Arena {
 		panic(ErrSizeMustBePowerOfTwo)
 	}
 	buf := make([]byte, totalSize)
+	for i := 0; i < len(buf); i++ {
+		buf[i] = 0
+	}
 	return NewArena(buf)
 }
 
@@ -51,7 +54,6 @@ func (a *Arena) alloc(size int, block bool) []byte {
 		return nil
 	}
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	offset, length := -1, int(^uint(0)>>1)
 	for k, v := range a.freeList {
 		if v >= size && v < length && k > offset {
@@ -60,6 +62,7 @@ func (a *Arena) alloc(size int, block bool) []byte {
 		}
 	}
 	if offset < 0 {
+		a.mu.Unlock()
 		return nil
 	}
 	foundOffset := offset
@@ -67,7 +70,7 @@ func (a *Arena) alloc(size int, block bool) []byte {
 	lengthHigh := HighBit(length - 1)
 	sizeHigh := HighBit(size - 1)
 	for offset < ending {
-		if lengthHigh > sizeHigh {
+		if lengthHigh > sizeHigh && lengthHigh > 4 {
 			lengthHigh--
 			length = 1 << uint(lengthHigh)
 		}
@@ -87,9 +90,11 @@ func (a *Arena) alloc(size int, block bool) []byte {
 	a.stats.AllocatedSize += length
 	if block {
 		a.stats.RequestedSize += length
+		a.mu.Unlock()
 		return a.buf[offset : offset+length]
 	}
 	a.stats.RequestedSize += size
+	a.mu.Unlock()
 	return a.buf[offset : offset+size]
 }
 
@@ -111,7 +116,6 @@ func (a *Arena) Free(ptr []byte) {
 		return
 	}
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	ptrHigh := HighBit(ptrSize - 1)
 	ptrLength := 1 << uint(ptrHigh)
 	offset := ptrOffset
@@ -141,10 +145,12 @@ func (a *Arena) Free(ptr []byte) {
 	}
 	a.stats.AllocatedSize -= ptrLength
 	a.stats.RequestedSize -= ptrSize
+	a.mu.Unlock()
 }
 
-func (a *Arena) Stats() ArenaStats {
+func (a *Arena) Stats() (stats ArenaStats) {
 	a.mu.Lock()
-	defer a.mu.Unlock()
-	return a.stats
+	stats = a.stats
+	a.mu.Unlock()
+	return
 }
