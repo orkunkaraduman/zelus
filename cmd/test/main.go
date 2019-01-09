@@ -81,6 +81,7 @@ func main() {
 		}
 		time.Sleep(1 * time.Second)
 		wg.Wait()
+		continue
 
 		for i := 0; i < 4; i++ {
 			go del(st, i*1536*1024*1024/4096, (i+1)*1536*1024*1024/4096)
