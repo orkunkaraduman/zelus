@@ -44,9 +44,9 @@ func TestArena(t *testing.T) {
 }
 
 func TestArena2(t *testing.T) {
-	a := AllocArena(1024)
-	ptr1 := a.Alloc(256)
-	ptr2 := a.Alloc(256)
+	a := AllocArena(512 * 1024 * 1024)
+	ptr1 := a.Alloc(500 * 1024)
+	ptr2 := a.Alloc(512)
 	ptr3 := a.Alloc(256)
 	a.Free(ptr1)
 	a.Free(ptr2)

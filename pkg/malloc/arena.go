@@ -31,7 +31,7 @@ func NewArena(buf []byte) *Arena {
 		buf: buf,
 		fl:  newFreeList(totalSize),
 	}
-	a.fl.set(0, h)
+	a.fl.setFree(0, h)
 	a.stats.TotalSize = totalSize
 	return a
 }
@@ -61,11 +61,12 @@ func (a *Arena) alloc(size int, block bool) []byte {
 	for offset < len(a.buf) {
 		high = a.fl.get(offset)
 		if high < 0 {
-			offset += length //!
-			continue
+			panic("aa")
 		}
+		allocated := high&freeListAlloc != 0
+		high &= 0x3f
 		length = 1 << uint(high)
-		if high >= sizeHigh {
+		if !allocated && high >= sizeHigh {
 			foundOffset = offset
 			foundLength = length
 			foundHigh = high
@@ -89,10 +90,10 @@ func (a *Arena) alloc(size int, block bool) []byte {
 		foundOffset = offset
 		foundLength = length
 		foundHigh = high
-		a.fl.set(foundOffset, foundHigh)
+		a.fl.setFree(foundOffset, foundHigh)
 		offset += length
 	}
-	a.fl.del(foundOffset)
+	a.fl.setAlloc(foundOffset, foundHigh)
 	offset = foundOffset
 	length = foundLength
 	a.stats.AllocatedSize += length
@@ -129,29 +130,29 @@ func (a *Arena) Free(ptr []byte) {
 	offset := ptrOffset
 	length := ptrLength
 	high := ptrHigh
-	a.fl.set(offset, high)
+	a.fl.setFree(offset, high)
 	b := true
 	for b {
 		b = false
 		if (offset/length)%2 == 0 {
 			n := offset + length
-			l := a.fl.get(n)
+			l := a.fl.getFree(n)
 			if l >= 0 && 1<<uint(l) == length {
 				a.fl.del(n)
 				length <<= 1
 				high++
-				a.fl.set(offset, high)
+				a.fl.setFree(offset, high)
 				b = true
 			}
 		} else {
 			n := offset - length
-			l := a.fl.get(n)
+			l := a.fl.getFree(n)
 			if l >= 0 && 1<<uint(l) == length {
 				a.fl.del(offset)
 				offset = n
 				length <<= 1
 				high++
-				a.fl.set(offset, high)
+				a.fl.setFree(offset, high)
 				b = true
 			}
 		}
