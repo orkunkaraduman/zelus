@@ -1,79 +1,61 @@
 package malloc
 
-import (
-	"unsafe"
-)
-
 type freeList struct {
-	list [][]int
+	list []uint8
 }
 
-func newFreeList() *freeList {
-	var zeroInt int
-	return &freeList{
-		list: make([][]int, unsafe.Sizeof(zeroInt)*8),
+const minHigh = 8
+const minLength = 1 << minHigh
+
+func newFreeList(size int) *freeList {
+	count := size / minLength
+	f := &freeList{
+		list: make([]uint8, count),
 	}
+	for i := range f.list {
+		f.list[i] = 0xff
+	}
+	return f
 }
 
-func (f *freeList) size() int {
+func (f *freeList) filledCount() int {
 	r := 0
-	for _, l := range f.list {
-		for _, o := range l {
-			if o >= 0 {
-				r++
-			}
+	for _, v := range f.list {
+		if v != 0xff {
+			r++
 		}
 	}
 	return r
 }
 
-func (f *freeList) find(h, v int) int {
-	for i, u := range f.list[h] {
-		if u == v {
-			return i
+func (f *freeList) filledSize() int {
+	r := 0
+	for _, v := range f.list {
+		if v != 0xff {
+			r += 1 << v
 		}
 	}
-	return -1
+	return r
 }
 
-func (f *freeList) first(h int) int {
-	for i, u := range f.list[h] {
-		if u >= 0 {
-			return i
-		}
+func (f *freeList) get(offset int) int {
+	i := offset / minLength
+	if i >= len(f.list) {
+		return -1
 	}
-	return -1
-}
-
-func (f *freeList) get(h, i int) int {
-	return f.list[h][i]
-}
-
-func (f *freeList) set(h, i int, v int) {
-	f.list[h][i] = v
-}
-
-func (f *freeList) del(h, i int) {
-	f.list[h][i] = -1
-	m := -1
-	for j := len(f.list[h]) - 1; j >= 0 && f.list[h][j] < 0; j-- {
-		m = j
+	v := f.list[i]
+	if v == 0xff {
+		return -1
 	}
-	if m >= 0 {
-		f.list[h] = f.list[h][:m]
-	}
+	return int(v)
 }
 
-func (f *freeList) append(h int, v int) int {
-	f.list[h] = append(f.list[h], v)
-	return len(f.list[h]) - 1
+func (f *freeList) set(offset int, high int) {
+	i := offset / minLength
+	f.list[i] = uint8(high)
 }
 
-func (f *freeList) add(h int, v int) int {
-	i := f.find(h, -1)
-	if i < 0 {
-		return f.append(h, v)
-	}
-	f.list[h][i] = v
-	return i
+func (f *freeList) del(offset int) {
+	i := offset / minLength
+	f.list[i] = 0xff
 }

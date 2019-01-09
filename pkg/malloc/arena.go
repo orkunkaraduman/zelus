@@ -29,9 +29,9 @@ func NewArena(buf []byte) *Arena {
 	}
 	a := &Arena{
 		buf: buf,
-		fl:  newFreeList(),
+		fl:  newFreeList(totalSize),
 	}
-	a.fl.add(h, 0)
+	a.fl.set(0, h)
 	a.stats.TotalSize = totalSize
 	return a
 }
@@ -56,44 +56,43 @@ func (a *Arena) alloc(size int, block bool) []byte {
 	}
 	a.mu.Lock()
 	sizeHigh := HighBit(size - 1)
-	offset, length, high, idx := -1, int(^uint(0)>>1), -1, -1
-	for h := HighBit(length - 1); h >= sizeHigh; h-- {
-		i := a.fl.first(h)
-		if i >= 0 {
-			offset = a.fl.get(h, i)
-			length = 1 << uint(h)
-			high = h
-			idx = i
+	foundOffset, foundLength, foundHigh := -1, 0, -1
+	offset, length, high := 0, 1<<minHigh, minHigh
+	for offset < len(a.buf) {
+		high = a.fl.get(offset)
+		if high < 0 {
+			offset += length //!
+			continue
 		}
+		length = 1 << uint(high)
+		if high >= sizeHigh {
+			foundOffset = offset
+			foundLength = length
+			foundHigh = high
+		}
+		offset += length
 	}
-	if offset < 0 {
+	if foundOffset < 0 {
 		a.mu.Unlock()
 		return nil
 	}
-	foundOffset := offset
-	foundLength := length
-	foundHigh := high
-	foundIdx := idx
-	a.fl.del(foundHigh, foundIdx)
-	foundIdx = -1
+	a.fl.del(foundOffset)
+	offset = foundOffset
+	length = foundLength
+	high = foundHigh
 	ending := offset + length
 	for offset < ending {
-		if high > sizeHigh && high > 8 {
+		if high > sizeHigh && high > minHigh {
 			high--
 			length >>= 1
-		}
-		if length < size {
-			break
 		}
 		foundOffset = offset
 		foundLength = length
 		foundHigh = high
-		foundIdx = a.fl.add(high, offset)
+		a.fl.set(foundOffset, foundHigh)
 		offset += length
 	}
-	if foundIdx >= 0 {
-		a.fl.del(foundHigh, foundIdx)
-	}
+	a.fl.del(foundOffset)
 	offset = foundOffset
 	length = foundLength
 	a.stats.AllocatedSize += length
@@ -130,33 +129,29 @@ func (a *Arena) Free(ptr []byte) {
 	offset := ptrOffset
 	length := ptrLength
 	high := ptrHigh
-	a.fl.add(high, offset)
+	a.fl.set(offset, high)
 	b := true
 	for b {
 		b = false
 		if (offset/length)%2 == 0 {
 			n := offset + length
-			idx := a.fl.find(high, n)
-			if idx >= 0 {
-				a.fl.del(high, idx)
-				idx = a.fl.find(high, offset)
-				a.fl.del(high, idx)
+			l := a.fl.get(n)
+			if l >= 0 && 1<<uint(l) == length {
+				a.fl.del(n)
 				length <<= 1
 				high++
-				a.fl.add(high, offset)
+				a.fl.set(offset, high)
 				b = true
 			}
 		} else {
 			n := offset - length
-			idx := a.fl.find(high, n)
-			if idx >= 0 {
-				a.fl.del(high, idx)
-				idx = a.fl.find(high, offset)
-				a.fl.del(high, idx)
+			l := a.fl.get(n)
+			if l >= 0 && 1<<uint(l) == length {
+				a.fl.del(offset)
 				offset = n
 				length <<= 1
 				high++
-				a.fl.add(high, offset)
+				a.fl.set(offset, high)
 				b = true
 			}
 		}

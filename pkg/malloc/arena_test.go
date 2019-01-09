@@ -7,7 +7,7 @@ import (
 )
 
 func TestArena(t *testing.T) {
-	r := rand.New(rand.NewSource(time.Now().Unix()))
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 	size := 256 * 1024 * 1024
 	a := AllocArena(size)
 	ptrList := make(map[int][]byte)
@@ -24,7 +24,7 @@ func TestArena(t *testing.T) {
 		requested += l
 		i++
 	}
-	t.Logf("Allocated: count=%d size=%d freelist=%d", i, requested, a.fl.size())
+	t.Logf("Allocated: count=%d size=%d freelistCount=%d freelistSize=%d %d", i, requested, a.fl.filledCount(), a.fl.filledSize(), a.Stats().AllocatedSize)
 	if a.Stats().RequestedSize != requested {
 		t.Error("Stats error")
 		t.FailNow()
@@ -32,8 +32,8 @@ func TestArena(t *testing.T) {
 	for _, ptr := range ptrList {
 		a.Free(ptr)
 	}
-	if a.fl.size() != 1 {
-		t.Errorf("Freelist size error %d", a.fl.size())
+	if a.fl.filledCount() != 1 {
+		t.Errorf("Freelist count error %d", a.fl.filledCount())
 		t.FailNow()
 	}
 	if a.Stats().RequestedSize != 0 || a.Stats().AllocatedSize != 0 {
@@ -41,4 +41,14 @@ func TestArena(t *testing.T) {
 		t.FailNow()
 	}
 	t.Log("Arena OK")
+}
+
+func TestArena2(t *testing.T) {
+	a := AllocArena(1024)
+	ptr1 := a.Alloc(256)
+	ptr2 := a.Alloc(256)
+	ptr3 := a.Alloc(256)
+	a.Free(ptr1)
+	a.Free(ptr2)
+	a.Free(ptr3)
 }
