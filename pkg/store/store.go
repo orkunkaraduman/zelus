@@ -7,18 +7,21 @@ import (
 )
 
 type Store struct {
-	mu      sync.RWMutex
-	slots   []slot
-	memPool *malloc.Pool
+	mu       sync.RWMutex
+	slots    []slot
+	slotPool *malloc.Pool
+	dataPool *malloc.Pool
 }
 
 func New(count int, size int) (st *Store) {
 	if count <= 0 {
 		return
 	}
+	p := malloc.AllocPool(size)
 	st = &Store{
-		slots:   make([]slot, count),
-		memPool: malloc.AllocPool(size),
+		slots:    make([]slot, count),
+		slotPool: p,
+		dataPool: p,
 	}
 	return
 }
@@ -60,18 +63,18 @@ func (st *Store) Set(key string, val []byte, replace bool) bool {
 			return false
 		}
 		oldNdIdx = ndIdx
-		ndIdx = sl.NewNode(st.memPool)
+		ndIdx = sl.NewNode(st.slotPool)
 	} else {
-		ndIdx = sl.NewNode(st.memPool)
+		ndIdx = sl.NewNode(st.slotPool)
 	}
 	if ndIdx < 0 {
 		return false
 	}
 	nd := &sl.Nodes[ndIdx]
 	nd.KeyHash = keyHash
-	dataIdx := nd.Alloc(st.memPool, len(bKey)+len(val))
+	dataIdx := nd.Alloc(st.slotPool, st.dataPool, len(bKey)+len(val))
 	if dataIdx < 0 {
-		sl.DelNode(st.memPool, ndIdx)
+		sl.DelNode(st.slotPool, st.dataPool, ndIdx)
 		return false
 	}
 	for bKeyIdx, valIdx := 0, 0; dataIdx < len(nd.Datas); dataIdx++ {
@@ -86,7 +89,7 @@ func (st *Store) Set(key string, val []byte, replace bool) bool {
 		}
 	}
 	if oldNdIdx >= 0 {
-		sl.DelNode(st.memPool, oldNdIdx)
+		sl.DelNode(st.slotPool, st.dataPool, oldNdIdx)
 	}
 	return true
 }
@@ -105,7 +108,7 @@ func (st *Store) Append(key string, val []byte) bool {
 		return false
 	}
 	nd := &sl.Nodes[ndIdx]
-	dataIdx := nd.Alloc(st.memPool, len(val))
+	dataIdx := nd.Alloc(st.slotPool, st.dataPool, len(val))
 	if dataIdx < 0 {
 		return false
 	}
@@ -113,5 +116,22 @@ func (st *Store) Append(key string, val []byte) bool {
 		data := nd.Datas[dataIdx]
 		valIdx += copy(data, val[valIdx:])
 	}
+	return true
+}
+
+func (st *Store) Del(key string) bool {
+	st.mu.RLock()
+	defer st.mu.RUnlock()
+	bKey := getBKey(key)
+	keyHash := HashFunc(bKey)
+	slotIdx := keyHash % len(st.slots)
+	sl := &st.slots[slotIdx]
+	sl.Mu.Lock()
+	defer sl.Mu.Unlock()
+	ndIdx := sl.FindNode(keyHash, bKey)
+	if ndIdx < 0 {
+		return false
+	}
+	sl.DelNode(st.slotPool, st.dataPool, ndIdx)
 	return true
 }

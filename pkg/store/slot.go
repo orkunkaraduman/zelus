@@ -29,7 +29,7 @@ func (sl *slot) FindNode(keyHash int, bKey []byte) int {
 	return -1
 }
 
-func (sl *slot) NewNode(p *malloc.Pool) int {
+func (sl *slot) NewNode(slotPool *malloc.Pool) int {
 	for i, j := 0, len(sl.Nodes); i < j; i++ {
 		nd := &sl.Nodes[i]
 		if nd.KeyHash < 0 {
@@ -39,7 +39,7 @@ func (sl *slot) NewNode(p *malloc.Pool) int {
 	var zeroNode node
 	sizeOfNode := int(unsafe.Sizeof(zeroNode))
 	idx := len(sl.Nodes)
-	ptr := p.AllocBlock((idx + 1) * sizeOfNode)
+	ptr := slotPool.AllocBlock((idx + 1) * sizeOfNode)
 	if ptr == nil {
 		return -1
 	}
@@ -53,16 +53,16 @@ func (sl *slot) NewNode(p *malloc.Pool) int {
 		}
 	}
 	if sl.Nodes != nil {
-		p.Free((*[^uint32(0) >> 1]byte)(unsafe.Pointer(&sl.Nodes[0]))[:len(sl.Nodes)*sizeOfNode][:])
+		slotPool.Free((*[^uint32(0) >> 1]byte)(unsafe.Pointer(&sl.Nodes[0]))[:len(sl.Nodes)*sizeOfNode][:])
 	}
 	sl.Nodes = newNodes
 	return idx
 }
 
-func (sl *slot) DelNode(p *malloc.Pool, idx int) {
+func (sl *slot) DelNode(slotPool, dataPool *malloc.Pool, idx int) {
 	nd := &sl.Nodes[idx]
 	nd.KeyHash = -1
-	nd.Free(p)
+	nd.Free(slotPool, dataPool)
 	//! free node array
 }
 
@@ -71,12 +71,12 @@ type node struct {
 	Datas   [][]byte
 }
 
-func (nd *node) Alloc(p *malloc.Pool, size int) int {
+func (nd *node) Alloc(slotPool, dataPool *malloc.Pool, size int) int {
 	datas := [][]byte(nil)
 	for size > 0 {
 		var ptr []byte
 		for l := 1 << uint(malloc.HighBit(size)-1); l > 0 && ptr == nil; l >>= 1 {
-			ptr = p.Alloc(l)
+			ptr = dataPool.Alloc(l)
 		}
 		if ptr == nil {
 			break
@@ -86,7 +86,7 @@ func (nd *node) Alloc(p *malloc.Pool, size int) int {
 	}
 	if size != 0 {
 		for _, ptr := range datas {
-			p.Free(ptr)
+			dataPool.Free(ptr)
 		}
 		return -1
 	}
@@ -96,7 +96,7 @@ func (nd *node) Alloc(p *malloc.Pool, size int) int {
 	for idx > 0 && nd.Datas[idx-1] == nil {
 		idx--
 	}
-	ptr := p.AllocBlock((len(nd.Datas) - idx + len(datas)) * sizeOfData)
+	ptr := slotPool.AllocBlock((len(nd.Datas) - idx + len(datas)) * sizeOfData)
 	if ptr == nil {
 		return -1
 	}
@@ -114,20 +114,20 @@ func (nd *node) Alloc(p *malloc.Pool, size int) int {
 		}
 	}
 	if nd.Datas != nil {
-		p.Free((*[^uint32(0) >> 1]byte)(unsafe.Pointer(&nd.Datas[0]))[:len(nd.Datas)*sizeOfData][:])
+		slotPool.Free((*[^uint32(0) >> 1]byte)(unsafe.Pointer(&nd.Datas[0]))[:len(nd.Datas)*sizeOfData][:])
 	}
 	nd.Datas = newDatas
 	return idx
 }
 
-func (nd *node) Free(p *malloc.Pool) {
+func (nd *node) Free(slotPool, dataPool *malloc.Pool) {
 	var zeroData []byte
 	sizeOfData := int(unsafe.Sizeof(zeroData))
 	for i, j := 0, len(nd.Datas); i < j; i++ {
-		p.Free(nd.Datas[i])
+		dataPool.Free(nd.Datas[i])
 	}
 	if nd.Datas != nil {
-		p.Free((*[^uint32(0) >> 1]byte)(unsafe.Pointer(&nd.Datas[0]))[:len(nd.Datas)*sizeOfData][:])
+		slotPool.Free((*[^uint32(0) >> 1]byte)(unsafe.Pointer(&nd.Datas[0]))[:len(nd.Datas)*sizeOfData][:])
 	}
 	nd.Datas = nil
 }
