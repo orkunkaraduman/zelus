@@ -1,8 +1,9 @@
 package malloc
 
 type freeList struct {
-	size int
-	list []uint8
+	size  int
+	list  []uint8
+	first int
 }
 
 const (
@@ -13,8 +14,9 @@ const (
 func newFreeList(size int) *freeList {
 	count := size / minLength
 	f := &freeList{
-		size: size,
-		list: make([]uint8, count),
+		size:  size,
+		list:  make([]uint8, count),
+		first: (int(^uint(0) >> 1)),
 	}
 	for i := range f.list {
 		f.list[i] = 0xff
@@ -56,6 +58,9 @@ func (f *freeList) getFree(offset int) int {
 
 func (f *freeList) setFree(offset int, high int) {
 	i := offset / minLength
+	if offset < f.first {
+		f.first = offset
+	}
 	f.list[i] = uint8(high & 0x3f)
 }
 

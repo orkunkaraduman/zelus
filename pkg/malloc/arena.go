@@ -57,7 +57,8 @@ func (a *Arena) alloc(size int, block bool) []byte {
 	a.mu.Lock()
 	sizeHigh := HighBit(size - 1)
 	foundOffset, foundLength, foundHigh := -1, 0, -1
-	offset, length, high := 0, 1<<minHigh, minHigh
+	offset, length, high := a.fl.first, 1<<minHigh, minHigh
+	first := -1
 	for offset < len(a.buf) {
 		high = a.fl.get(offset)
 		if high < 0 {
@@ -66,32 +67,41 @@ func (a *Arena) alloc(size int, block bool) []byte {
 		allocated := high&freeListAlloc != 0
 		high &= 0x3f
 		length = 1 << uint(high)
-		if !allocated && high >= sizeHigh {
-			foundOffset = offset
-			foundLength = length
-			foundHigh = high
+		if !allocated {
+			if first < 0 {
+				first = offset
+			}
+			if high >= sizeHigh {
+				foundOffset = offset
+				foundLength = length
+				foundHigh = high
+				break
+			}
 		}
 		offset += length
+	}
+	if first > a.fl.first {
+		a.fl.first = first
 	}
 	if foundOffset < 0 {
 		a.mu.Unlock()
 		return nil
 	}
 	a.fl.del(foundOffset)
-	offset = foundOffset
+	offset = foundOffset + foundLength
 	length = foundLength
 	high = foundHigh
-	ending := offset + length
-	for offset < ending {
+	starting := foundOffset
+	for offset > starting {
 		if high > sizeHigh && high > minHigh {
 			high--
 			length >>= 1
 		}
+		offset -= length
 		foundOffset = offset
 		foundLength = length
 		foundHigh = high
 		a.fl.setFree(foundOffset, foundHigh)
-		offset += length
 	}
 	a.fl.setAlloc(foundOffset, foundHigh)
 	offset = foundOffset

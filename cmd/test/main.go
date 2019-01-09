@@ -4,7 +4,9 @@ package main
 
 import (
 	"fmt"
-	//_ "net/http/pprof"
+	"log"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"runtime"
@@ -22,11 +24,11 @@ func run(st *store.Store, start, stop int) {
 	var buf [10 * 4096]byte
 	i, r := 0, false
 	for i = start; i < stop; i++ {
-		r = st.Set(fmt.Sprintf("%d", i), buf[0:4096-256], true)
+		r = st.Set(fmt.Sprintf("%d", i), buf[0:4096-500], true)
 		if !r {
 			break
 		}
-		/*if i%10000 == 0 || i > 960000 {
+		/*if i%10000 == 0 {
 			fmt.Println(i)
 		}*/
 	}
@@ -34,10 +36,27 @@ func run(st *store.Store, start, stop int) {
 	wg.Done()
 }
 
+func del(st *store.Store, start, stop int) {
+	wg.Add(1)
+	fmt.Println(time.Now(), "del start")
+	i, r := 0, false
+	for i = start; i < stop; i++ {
+		r = st.Del(fmt.Sprintf("%d", i))
+		if !r {
+			break
+		}
+		/*if i%10000 == 0 {
+			fmt.Println(i)
+		}*/
+	}
+	fmt.Println("del", time.Now(), i, r)
+	wg.Done()
+}
+
 func main() {
-	/*go func() {
+	go func() {
 		log.Println(http.ListenAndServe("localhost:6060", nil))
-	}()*/
+	}()
 
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)
@@ -48,22 +67,25 @@ func main() {
 		os.Exit(1)
 	}()
 
-	st := store.New(16*1024*1024, 10*1024*1024*1024)
+	size := 8 * 1024 * 1024 * 1024
+	st := store.New(2*size/4096, size)
 
-	//run(st, 0*1024*1024*1024/4096, 4*1024*1024*1024/4096)
+	//run(st, 0*1024*1024*1024/4096, 2*1024*1024*1024/4096)
 	//run(st, 4*1024*1024*1024/4096, 8*1024*1024*1024/4096)
 	//run(st, 0*2*1024*1024*1024/4096, (0+1)*3*1024*1024*1024/4096)
 	//return
 
-	for i := 0; i < 4; i++ {
-		go run(st, i*2*1024*1024*1024/4096, (i+1)*2*1024*1024*1024/4096)
-	}
-	time.Sleep(1 * time.Second)
-	wg.Wait()
+	for {
+		for i := 0; i < 4; i++ {
+			go run(st, i*1536*1024*1024/4096, (i+1)*1536*1024*1024/4096)
+		}
+		time.Sleep(1 * time.Second)
+		wg.Wait()
 
-	for i := 0; i < 4; i++ {
-		go run(st, i*2*1024*1024*1024/4096, (i+1)*2*1024*1024*1024/4096)
+		for i := 0; i < 4; i++ {
+			go del(st, i*1536*1024*1024/4096, (i+1)*1536*1024*1024/4096)
+		}
+		time.Sleep(1 * time.Second)
+		wg.Wait()
 	}
-	time.Sleep(1 * time.Second)
-	wg.Wait()
 }
