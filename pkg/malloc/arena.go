@@ -1,13 +1,13 @@
 package malloc
 
 import (
-	"runtime"
+	"sync"
+	"time"
 	"unsafe"
 )
 
 type Arena struct {
-	//mu    sync.Mutex
-	mu    chan struct{}
+	mu    sync.Mutex
 	buf   []byte
 	fl    *freeList
 	stats ArenaStats
@@ -29,7 +29,6 @@ func NewArena(buf []byte) *Arena {
 		panic(ErrSizeMustBePowerOfTwo)
 	}
 	a := &Arena{
-		mu:  make(chan struct{}, 1),
 		buf: buf,
 		fl:  newFreeList(totalSize),
 	}
@@ -65,16 +64,19 @@ func (a *Arena) dispatch() {
 			allocated := high&freeListAlloc != 0
 			high &= 0x3f
 			length = 1 << uint(high)
+			c := a.fl.queue[high-minHigh]
 			if !allocated {
 				select {
-				case a.fl.queue[high-minHigh] <- offset:
+				case c <- offset:
 				default:
 				}
 			}
 			offset += length
+			if len(c) >= cap(c) {
+				time.Sleep(5 * time.Millisecond)
+			}
 		}
-		//time.Sleep(50 * time.Millisecond)
-		runtime.Gosched()
+		time.Sleep(5 * time.Millisecond)
 	}
 }
 
@@ -95,11 +97,10 @@ func (a *Arena) alloc(size int, block bool) []byte {
 		case offset = <-a.fl.queue[high-minHigh]:
 			h := a.fl.getFree(offset)
 			if h >= high {
-				//a.mu.Lock()
-				a.mu <- struct{}{}
+				a.mu.Lock()
 				h2 := a.fl.getFree(offset)
 				if h != h2 {
-					<-a.mu
+					a.mu.Unlock()
 					continue
 				}
 				foundOffset = offset
@@ -137,11 +138,11 @@ func (a *Arena) alloc(size int, block bool) []byte {
 	a.stats.AllocatedSize += length
 	if block {
 		a.stats.RequestedSize += length
-		<-a.mu
+		a.mu.Unlock()
 		return a.buf[offset : offset+length]
 	}
 	a.stats.RequestedSize += size
-	<-a.mu
+	a.mu.Unlock()
 	return a.buf[offset : offset+size]
 }
 
@@ -170,8 +171,7 @@ func (a *Arena) Free(ptr []byte) {
 	offset := ptrOffset
 	length := ptrLength
 	high := ptrHigh
-	//a.mu.Lock()
-	a.mu <- struct{}{}
+	a.mu.Lock()
 	a.fl.setFree(offset, high)
 	b := true
 	for b {
@@ -199,17 +199,14 @@ func (a *Arena) Free(ptr []byte) {
 			}
 		}
 	}
-	//a.mu.Unlock()
-	<-a.mu
+	a.mu.Unlock()
 	a.stats.AllocatedSize -= ptrLength
 	a.stats.RequestedSize -= ptrSize
 }
 
 func (a *Arena) Stats() (stats ArenaStats) {
-	//a.mu.Lock()
-	a.mu <- struct{}{}
+	a.mu.Lock()
 	stats = a.stats
-	//a.mu.Unlock()
-	<-a.mu
+	a.mu.Unlock()
 	return
 }
