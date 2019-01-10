@@ -14,22 +14,10 @@ type slot struct {
 }
 
 func (sl *slot) FindNode(keyHash int, bKey []byte) int {
-	//for i, j := 0, len(sl.Nodes); i < j; i++ {
 	for i := range sl.Nodes {
 		nd := &sl.Nodes[i]
 		if nd.KeyHash == keyHash {
 			o, p := 0, len(bKey)
-			/*for k, l := 0, len(nd.Datas); k < l; k++ {
-				data := nd.Datas[k]
-				for m, n := 0, len(data); m < n && o < p; m, o = m+1, o+1 {
-					if bKey[o] != data[m] {
-						return -1
-					}
-				}
-				if o == p {
-					return i
-				}
-			}*/
 			for _, data := range nd.Datas {
 				r := len(data)
 				if r > p {
@@ -50,7 +38,6 @@ func (sl *slot) FindNode(keyHash int, bKey []byte) int {
 }
 
 func (sl *slot) NewNode(slotPool *malloc.Pool) int {
-	//for i, j := 0, len(sl.Nodes); i < j; i++ {
 	for i := range sl.Nodes {
 		nd := &sl.Nodes[i]
 		if nd.KeyHash < 0 {
@@ -65,7 +52,6 @@ func (sl *slot) NewNode(slotPool *malloc.Pool) int {
 		return -1
 	}
 	newNodes := (*[^uint32(0) >> 1]node)(unsafe.Pointer(&ptr[0]))[:len(ptr)/sizeOfNode]
-	//for i, j := 0, len(newNodes); i < j; i++ {
 	for i := range newNodes {
 		if i < idx {
 			newNodes[i] = sl.Nodes[i]
@@ -124,7 +110,6 @@ func (nd *node) Alloc(slotPool, dataPool *malloc.Pool, size int) int {
 	}
 	newDatas := (*[^uint32(0) >> 1][]byte)(unsafe.Pointer(&ptr[0]))[:len(ptr)/sizeOfData]
 	k := 0
-	//for i, j := 0, len(newDatas); i < j; i++ {
 	for i := range newDatas {
 		if i < idx {
 			newDatas[i] = nd.Datas[i]
@@ -147,9 +132,8 @@ func (nd *node) Alloc(slotPool, dataPool *malloc.Pool, size int) int {
 func (nd *node) Free(slotPool, dataPool *malloc.Pool) {
 	var zeroData []byte
 	sizeOfData := int(unsafe.Sizeof(zeroData))
-	//for i, j := 0, len(nd.Datas); i < j; i++ {
-	for i := range nd.Datas {
-		dataPool.Free(nd.Datas[i])
+	for _, data := range nd.Datas {
+		dataPool.Free(data)
 	}
 	if nd.Datas != nil {
 		slotPool.Free((*[^uint32(0) >> 1]byte)(unsafe.Pointer(&nd.Datas[0]))[:len(nd.Datas)*sizeOfData][:])
