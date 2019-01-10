@@ -46,16 +46,17 @@ func AllocArena(totalSize int) *Arena {
 		panic(ErrSizeMustBePowerOfTwo)
 	}
 	buf := make([]byte, totalSize)
-	for i := 0; i < len(buf); i++ {
+	for i, j := 0, len(buf); i < j; i += 1024 {
 		buf[i] = 0
 	}
 	return NewArena(buf)
 }
 
 func (a *Arena) dispatch() {
+	bufLen := len(a.buf)
 	for {
 		offset, length, high := 0, 1<<minHigh, minHigh
-		for offset < len(a.buf) {
+		for offset < bufLen {
 			high = a.fl.get(offset)
 			if high < 0 {
 				offset += length
@@ -91,7 +92,6 @@ func (a *Arena) alloc(size int, block bool) []byte {
 		length = 1 << uint(sizeHigh)
 		high = sizeHigh
 	}
-	//a.mu.Lock()
 	for foundOffset < 0 && high <= maxHigh {
 		select {
 		case offset = <-a.fl.queue[high-minHigh]:
@@ -113,7 +113,6 @@ func (a *Arena) alloc(size int, block bool) []byte {
 		}
 	}
 	if foundOffset < 0 {
-		//a.mu.Unlock()
 		return nil
 	}
 	a.fl.del(foundOffset)

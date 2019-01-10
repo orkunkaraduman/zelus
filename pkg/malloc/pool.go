@@ -33,7 +33,7 @@ func (p *Pool) Grow(n int) {
 		panic(ErrSizeMustBePositive)
 	}
 	buf := make([]byte, n)
-	for i := 0; i < len(buf); i += 1024 {
+	for i, j := 0, len(buf); i < j; i += 1024 {
 		buf[i] = 0
 	}
 	p.mu.Lock()

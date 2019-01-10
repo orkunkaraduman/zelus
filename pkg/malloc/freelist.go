@@ -27,7 +27,7 @@ func newFreeList(size int) *freeList {
 		f.list[i] = 0xff
 	}
 	for i := range f.queue {
-		f.queue[i] = make(chan int, 16*1024)
+		f.queue[i] = make(chan int, 4*1024)
 	}
 	return f
 }
