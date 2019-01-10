@@ -1,12 +1,13 @@
 package malloc
 
 import (
-	"sync"
+	"runtime"
 	"unsafe"
 )
 
 type Arena struct {
-	mu    sync.Mutex
+	//mu    sync.Mutex
+	mu    chan struct{}
 	buf   []byte
 	fl    *freeList
 	stats ArenaStats
@@ -28,6 +29,7 @@ func NewArena(buf []byte) *Arena {
 		panic(ErrSizeMustBePowerOfTwo)
 	}
 	a := &Arena{
+		mu:  make(chan struct{}, 1),
 		buf: buf,
 		fl:  newFreeList(totalSize),
 	}
@@ -72,6 +74,7 @@ func (a *Arena) dispatch() {
 			offset += length
 		}
 		//time.Sleep(50 * time.Millisecond)
+		runtime.Gosched()
 	}
 }
 
@@ -92,10 +95,11 @@ func (a *Arena) alloc(size int, block bool) []byte {
 		case offset = <-a.fl.queue[high-minHigh]:
 			h := a.fl.getFree(offset)
 			if h >= high {
-				a.mu.Lock()
+				//a.mu.Lock()
+				a.mu <- struct{}{}
 				h2 := a.fl.getFree(offset)
 				if h != h2 {
-					a.mu.Unlock()
+					<-a.mu
 					continue
 				}
 				foundOffset = offset
@@ -133,11 +137,11 @@ func (a *Arena) alloc(size int, block bool) []byte {
 	a.stats.AllocatedSize += length
 	if block {
 		a.stats.RequestedSize += length
-		a.mu.Unlock()
+		<-a.mu
 		return a.buf[offset : offset+length]
 	}
 	a.stats.RequestedSize += size
-	a.mu.Unlock()
+	<-a.mu
 	return a.buf[offset : offset+size]
 }
 
@@ -166,7 +170,8 @@ func (a *Arena) Free(ptr []byte) {
 	offset := ptrOffset
 	length := ptrLength
 	high := ptrHigh
-	a.mu.Lock()
+	//a.mu.Lock()
+	a.mu <- struct{}{}
 	a.fl.setFree(offset, high)
 	b := true
 	for b {
@@ -194,14 +199,17 @@ func (a *Arena) Free(ptr []byte) {
 			}
 		}
 	}
-	a.mu.Unlock()
+	//a.mu.Unlock()
+	<-a.mu
 	a.stats.AllocatedSize -= ptrLength
 	a.stats.RequestedSize -= ptrSize
 }
 
 func (a *Arena) Stats() (stats ArenaStats) {
-	a.mu.Lock()
+	//a.mu.Lock()
+	a.mu <- struct{}{}
 	stats = a.stats
-	a.mu.Unlock()
+	//a.mu.Unlock()
+	<-a.mu
 	return
 }
