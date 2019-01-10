@@ -2,6 +2,7 @@ package malloc
 
 import (
 	"sync"
+	"time"
 	"unsafe"
 )
 
@@ -33,6 +34,7 @@ func NewArena(buf []byte) *Arena {
 	}
 	a.fl.setFree(0, h)
 	a.stats.TotalSize = totalSize
+	go a.dispatch()
 	return a
 }
 
@@ -48,6 +50,30 @@ func AllocArena(totalSize int) *Arena {
 		buf[i] = 0
 	}
 	return NewArena(buf)
+}
+
+func (a *Arena) dispatch() {
+	for {
+		offset, length, high := 0, 1<<minHigh, minHigh
+		for offset < len(a.buf) {
+			high = a.fl.get(offset)
+			if high < 0 {
+				offset += length
+				continue
+			}
+			allocated := high&freeListAlloc != 0
+			high &= 0x3f
+			length = 1 << uint(high)
+			if !allocated {
+				select {
+				case a.fl.queue[high-minHigh] <- offset:
+				default:
+				}
+			}
+			offset += length
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 func (a *Arena) alloc(size int, block bool) []byte {
@@ -78,36 +104,6 @@ func (a *Arena) alloc(size int, block bool) []byte {
 			length <<= 1
 			high++
 		}
-	}
-	offset, length, high = 0, 1<<minHigh, minHigh
-	for foundOffset < 0 && offset < len(a.buf) {
-		a.mu.Lock()
-		high = a.fl.get(offset)
-		if high < 0 {
-			//panic("aa")
-			offset += length
-			a.mu.Unlock()
-			//runtime.Gosched()
-			continue
-		}
-		allocated := high&freeListAlloc != 0
-		high &= 0x3f
-		length = 1 << uint(high)
-		if !allocated {
-			select {
-			case a.fl.queue[high-minHigh] <- offset:
-			default:
-			}
-			if high >= sizeHigh {
-				foundOffset = offset
-				foundLength = length
-				foundHigh = high
-				break
-			}
-		}
-		offset += length
-		a.mu.Unlock()
-		//runtime.Gosched()
 	}
 	if foundOffset < 0 {
 		//a.mu.Unlock()

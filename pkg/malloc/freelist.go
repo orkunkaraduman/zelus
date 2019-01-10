@@ -1,5 +1,10 @@
 package malloc
 
+import (
+	"sync/atomic"
+	"unsafe"
+)
+
 type freeList struct {
 	size  int
 	list  []uint8
@@ -15,14 +20,14 @@ func newFreeList(size int) *freeList {
 	count := size / minLength
 	f := &freeList{
 		size:  size,
-		list:  make([]uint8, count),
+		list:  make([]uint8, count, count+4),
 		queue: make([]chan int, maxHigh-minHigh+1),
 	}
 	for i := range f.list {
 		f.list[i] = 0xff
 	}
 	for i := range f.queue {
-		f.queue[i] = make(chan int, 8*1024)
+		f.queue[i] = make(chan int, 16*1024)
 	}
 	return f
 }
@@ -92,7 +97,8 @@ func (f *freeList) get(offset int) int {
 	if i >= len(f.list) {
 		return -1
 	}
-	v := f.list[i]
+	//v := f.list[i]
+	v := uint8(atomic.LoadUint32((*uint32)(unsafe.Pointer(&f.list[i]))))
 	if v&freeListEmpty != 0 {
 		return -1
 	}
