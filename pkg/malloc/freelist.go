@@ -57,7 +57,7 @@ func (f *freeList) getFree(offset int) int {
 	if i >= len(f.list) {
 		return -1
 	}
-	v := f.list[i]
+	v := uint8(atomic.LoadUint32((*uint32)(unsafe.Pointer(&f.list[i]))))
 	if v&freeListEmpty != 0 || v&freeListAlloc != 0 {
 		return -1
 	}
@@ -79,7 +79,7 @@ func (f *freeList) getAlloc(offset int) int {
 	if i >= len(f.list) {
 		return -1
 	}
-	v := f.list[i]
+	v := uint8(atomic.LoadUint32((*uint32)(unsafe.Pointer(&f.list[i]))))
 	if v&freeListEmpty != 0 || v&freeListAlloc == 0 {
 		return -1
 	}
@@ -97,7 +97,6 @@ func (f *freeList) get(offset int) int {
 	if i >= len(f.list) {
 		return -1
 	}
-	//v := f.list[i]
 	v := uint8(atomic.LoadUint32((*uint32)(unsafe.Pointer(&f.list[i]))))
 	if v&freeListEmpty != 0 {
 		return -1

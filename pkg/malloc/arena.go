@@ -2,7 +2,6 @@ package malloc
 
 import (
 	"sync"
-	"time"
 	"unsafe"
 )
 
@@ -72,7 +71,7 @@ func (a *Arena) dispatch() {
 			}
 			offset += length
 		}
-		time.Sleep(50 * time.Millisecond)
+		//time.Sleep(50 * time.Millisecond)
 	}
 }
 
@@ -91,14 +90,17 @@ func (a *Arena) alloc(size int, block bool) []byte {
 	for foundOffset < 0 && high <= maxHigh {
 		select {
 		case offset = <-a.fl.queue[high-minHigh]:
-			a.mu.Lock()
 			h := a.fl.getFree(offset)
 			if h >= high {
+				a.mu.Lock()
+				h2 := a.fl.getFree(offset)
+				if h != h2 {
+					a.mu.Unlock()
+					continue
+				}
 				foundOffset = offset
 				foundLength = 1 << uint(h)
 				foundHigh = h
-			} else {
-				a.mu.Unlock()
 			}
 		default:
 			length <<= 1
