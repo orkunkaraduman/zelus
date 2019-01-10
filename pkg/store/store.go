@@ -40,10 +40,27 @@ func (st *Store) Get(key string) (val []byte) {
 		return
 	}
 	nd := &sl.Nodes[ndIdx]
-	for i, j := 0, len(nd.Datas); i < j; i++ {
-		val = append(val, nd.Datas[i]...)
+	l := 0
+	for _, data := range nd.Datas {
+		l += len(data)
 	}
-	val = val[len(bKey):]
+	p := len(bKey)
+	l -= p
+	m := 0
+	val = make([]byte, l)
+	for _, data := range nd.Datas {
+		n, r := 0, len(data)
+		if p != 0 {
+			if r > p {
+				r = p
+			}
+			n += r
+			p -= r
+		}
+		if p == 0 {
+			copy(val[m:], data[n:])
+		}
+	}
 	return
 }
 
@@ -72,20 +89,20 @@ func (st *Store) Set(key string, val []byte, replace bool) bool {
 	}
 	nd := &sl.Nodes[ndIdx]
 	nd.KeyHash = keyHash
-	dataIdx := nd.Alloc(st.slotPool, st.dataPool, len(bKey)+len(val))
-	if dataIdx < 0 {
+	datasIdx := nd.Alloc(st.slotPool, st.dataPool, len(bKey)+len(val))
+	if datasIdx < 0 {
 		sl.DelNode(st.slotPool, st.dataPool, ndIdx)
 		return false
 	}
-	for bKeyIdx, valIdx := 0, 0; dataIdx < len(nd.Datas); dataIdx++ {
-		data := nd.Datas[dataIdx]
+	j, m := 0, 0
+	for _, data := range nd.Datas {
 		n := 0
-		if bKeyIdx < len(bKey) {
+		if j < len(bKey) {
 			n = copy(data, bKey)
-			bKeyIdx += n
+			j += n
 		}
 		if n < len(data) {
-			valIdx += copy(data[n:], val[valIdx:])
+			m += copy(data[n:], val[m:])
 		}
 	}
 	if oldNdIdx >= 0 {
@@ -108,12 +125,12 @@ func (st *Store) Append(key string, val []byte) bool {
 		return false
 	}
 	nd := &sl.Nodes[ndIdx]
-	dataIdx := nd.Alloc(st.slotPool, st.dataPool, len(val))
-	if dataIdx < 0 {
+	datasIdx := nd.Alloc(st.slotPool, st.dataPool, len(val))
+	if datasIdx < 0 {
 		return false
 	}
-	for valIdx := 0; dataIdx < len(nd.Datas); dataIdx++ {
-		data := nd.Datas[dataIdx]
+	valIdx := 0
+	for _, data := range nd.Datas {
 		valIdx += copy(data, val[valIdx:])
 	}
 	return true

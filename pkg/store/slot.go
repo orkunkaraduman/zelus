@@ -14,15 +14,35 @@ type slot struct {
 }
 
 func (sl *slot) FindNode(keyHash int, bKey []byte) int {
-	for i, j := 0, len(sl.Nodes); i < j; i++ {
+	//for i, j := 0, len(sl.Nodes); i < j; i++ {
+	for i := range sl.Nodes {
 		nd := &sl.Nodes[i]
 		if nd.KeyHash == keyHash {
-			var buf [256]byte
-			for k, l, m := 0, len(nd.Datas), 0; k < l && m < len(buf); k++ {
-				m += copy(buf[m:], nd.Datas[k])
-			}
-			if bytes.Equal(bKey, buf[:len(bKey)]) {
-				return i
+			o, p := 0, len(bKey)
+			/*for k, l := 0, len(nd.Datas); k < l; k++ {
+				data := nd.Datas[k]
+				for m, n := 0, len(data); m < n && o < p; m, o = m+1, o+1 {
+					if bKey[o] != data[m] {
+						return -1
+					}
+				}
+				if o == p {
+					return i
+				}
+			}*/
+			for _, data := range nd.Datas {
+				r := len(data)
+				if r > p {
+					r = p
+				}
+				if !bytes.Equal(bKey[o:r], data[:r]) {
+					return -1
+				}
+				o += r
+				p -= r
+				if p == 0 {
+					return i
+				}
 			}
 		}
 	}
@@ -30,7 +50,8 @@ func (sl *slot) FindNode(keyHash int, bKey []byte) int {
 }
 
 func (sl *slot) NewNode(slotPool *malloc.Pool) int {
-	for i, j := 0, len(sl.Nodes); i < j; i++ {
+	//for i, j := 0, len(sl.Nodes); i < j; i++ {
+	for i := range sl.Nodes {
 		nd := &sl.Nodes[i]
 		if nd.KeyHash < 0 {
 			return i
@@ -44,7 +65,8 @@ func (sl *slot) NewNode(slotPool *malloc.Pool) int {
 		return -1
 	}
 	newNodes := (*[^uint32(0) >> 1]node)(unsafe.Pointer(&ptr[0]))[:len(ptr)/sizeOfNode]
-	for i, j := 0, len(newNodes); i < j; i++ {
+	//for i, j := 0, len(newNodes); i < j; i++ {
+	for i := range newNodes {
 		if i < idx {
 			newNodes[i] = sl.Nodes[i]
 		} else {
@@ -76,7 +98,7 @@ func (nd *node) Alloc(slotPool, dataPool *malloc.Pool, size int) int {
 	for size > 0 {
 		var ptr []byte
 		for l := 1 << uint(malloc.HighBit(size)-1); l > 0 && ptr == nil; l >>= 1 {
-			ptr = dataPool.Alloc(l)
+			ptr = dataPool.AllocBlock(l)
 		}
 		if ptr == nil {
 			break
@@ -84,7 +106,7 @@ func (nd *node) Alloc(slotPool, dataPool *malloc.Pool, size int) int {
 		datas = append(datas, ptr)
 		size -= len(ptr)
 	}
-	if size != 0 {
+	if size > 0 {
 		for _, ptr := range datas {
 			dataPool.Free(ptr)
 		}
@@ -101,7 +123,9 @@ func (nd *node) Alloc(slotPool, dataPool *malloc.Pool, size int) int {
 		return -1
 	}
 	newDatas := (*[^uint32(0) >> 1][]byte)(unsafe.Pointer(&ptr[0]))[:len(ptr)/sizeOfData]
-	for i, j, k := 0, len(newDatas), 0; i < j; i++ {
+	k := 0
+	//for i, j := 0, len(newDatas); i < j; i++ {
+	for i := range newDatas {
 		if i < idx {
 			newDatas[i] = nd.Datas[i]
 		} else {
@@ -123,7 +147,8 @@ func (nd *node) Alloc(slotPool, dataPool *malloc.Pool, size int) int {
 func (nd *node) Free(slotPool, dataPool *malloc.Pool) {
 	var zeroData []byte
 	sizeOfData := int(unsafe.Sizeof(zeroData))
-	for i, j := 0, len(nd.Datas); i < j; i++ {
+	//for i, j := 0, len(nd.Datas); i < j; i++ {
+	for i := range nd.Datas {
 		dataPool.Free(nd.Datas[i])
 	}
 	if nd.Datas != nil {
