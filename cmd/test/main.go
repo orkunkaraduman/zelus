@@ -67,7 +67,7 @@ func main() {
 		os.Exit(1)
 	}()
 
-	size := 8 * 1024 * 1024 * 1024
+	size := 10 * 1024 * 1024 * 1024
 	st := store.New(2*size/4096, size)
 
 	//run(st, 0*1024*1024*1024/4096, 2*1024*1024*1024/4096)
@@ -76,15 +76,15 @@ func main() {
 	//return
 
 	for {
-		for i := 0; i < 4; i++ {
-			go run(st, i*1536*1024*1024/4096, (i+1)*1536*1024*1024/4096)
+		for i := 0; i < 6; i++ {
+			go run(st, i*1*1024*1024*1024/4096, (i+1)*1*1024*1024*1024/4096)
 		}
 		time.Sleep(1 * time.Second)
 		wg.Wait()
 		continue
 
 		for i := 0; i < 4; i++ {
-			go del(st, i*1536*1024*1024/4096, (i+1)*1536*1024*1024/4096)
+			go del(st, i*1*1024*1024*1024/4096, (i+1)*1*1024*1024*1024/4096)
 		}
 		time.Sleep(1 * time.Second)
 		wg.Wait()

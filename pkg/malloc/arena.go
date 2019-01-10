@@ -56,9 +56,31 @@ func (a *Arena) alloc(size int, block bool) []byte {
 	}
 	sizeHigh := HighBit(size - 1)
 	foundOffset, foundLength, foundHigh := -1, 0, -1
-	offset, length, high := a.fl.first, 1<<minHigh, minHigh
-	first := -1
-	for offset < len(a.buf) {
+	offset, length, high := -1, 1<<minHigh, minHigh
+	if sizeHigh > high {
+		length = 1 << uint(sizeHigh)
+		high = sizeHigh
+	}
+	//a.mu.Lock()
+	for foundOffset < 0 && high <= maxHigh {
+		select {
+		case offset = <-a.fl.queue[high-minHigh]:
+			a.mu.Lock()
+			h := a.fl.getFree(offset)
+			if h >= high {
+				foundOffset = offset
+				foundLength = 1 << uint(h)
+				foundHigh = h
+			} else {
+				a.mu.Unlock()
+			}
+		default:
+			length <<= 1
+			high++
+		}
+	}
+	offset, length, high = 0, 1<<minHigh, minHigh
+	for foundOffset < 0 && offset < len(a.buf) {
 		a.mu.Lock()
 		high = a.fl.get(offset)
 		if high < 0 {
@@ -72,8 +94,9 @@ func (a *Arena) alloc(size int, block bool) []byte {
 		high &= 0x3f
 		length = 1 << uint(high)
 		if !allocated {
-			if first < 0 {
-				first = offset
+			select {
+			case a.fl.queue[high-minHigh] <- offset:
+			default:
 			}
 			if high >= sizeHigh {
 				foundOffset = offset
@@ -85,9 +108,6 @@ func (a *Arena) alloc(size int, block bool) []byte {
 		offset += length
 		a.mu.Unlock()
 		//runtime.Gosched()
-	}
-	if first > a.fl.first {
-		a.fl.first = first
 	}
 	if foundOffset < 0 {
 		//a.mu.Unlock()
@@ -141,6 +161,9 @@ func (a *Arena) Free(ptr []byte) {
 		return
 	}
 	ptrHigh := HighBit(ptrSize - 1)
+	if ptrHigh < minHigh {
+		ptrHigh = minHigh
+	}
 	ptrLength := 1 << uint(ptrHigh)
 	offset := ptrOffset
 	length := ptrLength

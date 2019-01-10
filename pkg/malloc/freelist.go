@@ -3,7 +3,7 @@ package malloc
 type freeList struct {
 	size  int
 	list  []uint8
-	first int
+	queue []chan int
 }
 
 const (
@@ -16,10 +16,13 @@ func newFreeList(size int) *freeList {
 	f := &freeList{
 		size:  size,
 		list:  make([]uint8, count),
-		first: (int(^uint(0) >> 1)),
+		queue: make([]chan int, maxHigh-minHigh+1),
 	}
 	for i := range f.list {
 		f.list[i] = 0xff
+	}
+	for i := range f.queue {
+		f.queue[i] = make(chan int, 8*1024)
 	}
 	return f
 }
@@ -27,7 +30,7 @@ func newFreeList(size int) *freeList {
 func (f *freeList) filledCount() int {
 	r := 0
 	for _, v := range f.list {
-		if v != 0xff {
+		if v&freeListEmpty == 0 {
 			r++
 		}
 	}
@@ -37,8 +40,8 @@ func (f *freeList) filledCount() int {
 func (f *freeList) filledSize() int {
 	r := 0
 	for _, v := range f.list {
-		if v != 0xff {
-			r += 1 << v
+		if v&freeListEmpty == 0 {
+			r += 1 << (v & 0x3f)
 		}
 	}
 	return r
@@ -58,10 +61,12 @@ func (f *freeList) getFree(offset int) int {
 
 func (f *freeList) setFree(offset int, high int) {
 	i := offset / minLength
-	if offset < f.first {
-		f.first = offset
+	v := uint8(high & 0x3f)
+	f.list[i] = v
+	select {
+	case f.queue[v-minHigh] <- offset:
+	default:
 	}
-	f.list[i] = uint8(high & 0x3f)
 }
 
 func (f *freeList) getAlloc(offset int) int {
@@ -78,7 +83,8 @@ func (f *freeList) getAlloc(offset int) int {
 
 func (f *freeList) setAlloc(offset int, high int) {
 	i := offset / minLength
-	f.list[i] = uint8((high & 0x3f) | freeListAlloc)
+	v := uint8(high & 0x3f)
+	f.list[i] = v | freeListAlloc
 }
 
 func (f *freeList) get(offset int) int {
