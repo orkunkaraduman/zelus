@@ -32,11 +32,11 @@ func (p *Pool) Grow(n int) {
 	if n <= 0 {
 		panic(ErrSizeMustBePositive)
 	}
-	p.mu.Lock()
 	buf := make([]byte, n)
-	for i := 0; i < len(buf); i++ {
+	for i := 0; i < len(buf); i += 1024 {
 		buf[i] = 0
 	}
+	p.mu.Lock()
 	offset := 0
 	for offset < n {
 		length := 1 << uint(HighBit(n-offset)-1)
