@@ -49,7 +49,25 @@ func del(st *store.Store, start, stop int) {
 			fmt.Println(i)
 		}*/
 	}
-	fmt.Println("del", time.Now(), i, r)
+	fmt.Println(time.Now(), "del", i, r)
+	wg.Done()
+}
+
+func get(st *store.Store, start, stop int) {
+	wg.Add(1)
+	fmt.Println(time.Now(), "get start")
+	i, r := 0, true
+	for i = start; i < stop; i++ {
+		p := st.Get(fmt.Sprintf("%d", i))
+		if p == nil {
+			r = false
+			break
+		}
+		/*if i%10000 == 0 {
+			fmt.Println(i)
+		}*/
+	}
+	fmt.Println(time.Now(), "get", i, r)
 	wg.Done()
 }
 
@@ -70,14 +88,22 @@ func main() {
 	size := 10 * 1024 * 1024 * 1024
 	st := store.New(2*size/4096, size)
 
+	//time.Sleep(10 * time.Second)
+
 	//run(st, 0*1024*1024*1024/4096, 2*1024*1024*1024/4096)
 	//run(st, 4*1024*1024*1024/4096, 8*1024*1024*1024/4096)
 	//run(st, 0*2*1024*1024*1024/4096, (0+1)*3*1024*1024*1024/4096)
 	//return
 
 	for {
-		for i := 0; i < 6; i++ {
-			go run(st, i*1*1024*1024*1024/4096, (i+1)*1*1024*1024*1024/4096)
+		for i := 0; i < 4; i++ {
+			go run(st, i*2*1024*1024*1024/4096, (i+1)*2*1024*1024*1024/4096)
+		}
+		time.Sleep(1 * time.Second)
+		wg.Wait()
+
+		for i := 0; i < 4; i++ {
+			go get(st, i*2*1024*1024*1024/4096, (i+1)*2*1024*1024*1024/4096)
 		}
 		time.Sleep(1 * time.Second)
 		wg.Wait()

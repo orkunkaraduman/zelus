@@ -28,23 +28,33 @@ func AllocPool(totalSize int) *Pool {
 	return p
 }
 
-func (p *Pool) Grow(n int) {
+func (p *Pool) Grow(n int) int {
 	if n <= 0 {
 		panic(ErrSizeMustBePositive)
 	}
+	k := n / minLength
+	if n%minLength != 0 {
+		k++
+	}
+	n = k * minLength
 	buf := make([]byte, n)
 	for i, j := 0, len(buf); i < j; i += 1024 {
 		buf[i] = 0
 	}
 	p.mu.Lock()
-	offset := 0
-	for offset < n {
-		length := 1 << uint(HighBit(n-offset)-1)
-		p.arenas = append(p.arenas, NewArena(buf[offset:offset+length]))
-		offset += length
+	m := 0
+	for n > 0 {
+		length := 1 << uint(HighBit(n)-1)
+		if length < minLength {
+			length = minLength
+		}
+		p.arenas = append(p.arenas, NewArena(buf[m:m+length]))
+		m += length
+		n -= length
 	}
-	p.stats.TotalSize += n
+	p.stats.TotalSize += m
 	p.mu.Unlock()
+	return m
 }
 
 func (p *Pool) alloc(size int, block bool) []byte {

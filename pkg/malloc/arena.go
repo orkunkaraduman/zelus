@@ -171,6 +171,11 @@ func (a *Arena) Free(ptr []byte) {
 	length := ptrLength
 	high := ptrHigh
 	a.mu.Lock()
+	h := a.fl.getAlloc(offset)
+	if h != high {
+		a.mu.Unlock()
+		panic(ErrInvalidPointer)
+	}
 	a.fl.setFree(offset, high)
 	b := true
 	for b {
