@@ -61,6 +61,10 @@ func (p *Pool) alloc(size int, block bool) []byte {
 	p.mu.RLock()
 	var ptr []byte
 	for _, a := range p.arenas {
+		ss := a.Stats()
+		if ss.TotalSize-ss.AllocatedSize < size {
+			continue
+		}
 		ptr = a.alloc(size, block)
 		if ptr != nil {
 			p.stats.AllocatedSize += 1 << uint(HighBit(len(ptr)-1))
