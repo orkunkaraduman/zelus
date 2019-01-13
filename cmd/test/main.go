@@ -20,11 +20,15 @@ var wg sync.WaitGroup
 
 func run(st *store.Store, start, stop int) {
 	wg.Add(1)
+	keys := make([]string, stop-start)
+	for i := start; i < stop; i++ {
+		keys[i-start] = fmt.Sprintf("%d", i)
+	}
 	fmt.Println(time.Now(), "start")
 	var buf [10 * 4096]byte
 	i, r := 0, false
 	for i = start; i < stop; i++ {
-		r = st.Set(fmt.Sprintf("%d", i), buf[0:4096-500], true)
+		r = st.Set(keys[i-start], buf[0:4096], true)
 		if !r {
 			break
 		}
@@ -38,10 +42,14 @@ func run(st *store.Store, start, stop int) {
 
 func del(st *store.Store, start, stop int) {
 	wg.Add(1)
+	keys := make([]string, stop-start)
+	for i := start; i < stop; i++ {
+		keys[i-start] = fmt.Sprintf("%d", i)
+	}
 	fmt.Println(time.Now(), "del start")
 	i, r := 0, false
 	for i = start; i < stop; i++ {
-		r = st.Del(fmt.Sprintf("%d", i))
+		r = st.Del(keys[i-start])
 		if !r {
 			break
 		}
@@ -55,10 +63,14 @@ func del(st *store.Store, start, stop int) {
 
 func get(st *store.Store, start, stop int) {
 	wg.Add(1)
+	keys := make([]string, stop-start)
+	for i := start; i < stop; i++ {
+		keys[i-start] = fmt.Sprintf("%d", i)
+	}
 	fmt.Println(time.Now(), "get start")
 	i, r := 0, true
 	for i = start; i < stop; i++ {
-		p := st.Get(fmt.Sprintf("%d", i))
+		p := st.Get(keys[i-start])
 		if p == nil {
 			r = false
 			break
@@ -101,12 +113,14 @@ func main() {
 		}
 		time.Sleep(1 * time.Second)
 		wg.Wait()
+		runtime.Gosched()
 
 		for i := 0; i < 4; i++ {
 			go get(st, i*2*1024*1024*1024/4096, (i+1)*2*1024*1024*1024/4096)
 		}
 		time.Sleep(1 * time.Second)
 		wg.Wait()
+		runtime.Gosched()
 		continue
 
 		for i := 0; i < 4; i++ {
@@ -114,5 +128,6 @@ func main() {
 		}
 		time.Sleep(1 * time.Second)
 		wg.Wait()
+		runtime.Gosched()
 	}
 }
