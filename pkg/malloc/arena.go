@@ -8,11 +8,16 @@ import (
 )
 
 type Arena struct {
-	mu    sync.Mutex
 	buf   []byte
 	fl    *freeList
+	flMu  []sync.Mutex
 	stats ArenaStats
 }
+
+const (
+	flMuHigh   = 30
+	flMuLength = 1 << flMuHigh
+)
 
 type ArenaStats struct {
 	TotalSize     int
@@ -29,28 +34,31 @@ func NewArena(buf []byte) *Arena {
 	if totalSize != 1<<uint(h) {
 		panic(ErrSizeMustBePowerOfTwo)
 	}
+	if h < minHigh {
+		panic(ErrSizeMustBeGEMinLength)
+	}
 	a := &Arena{
-		buf: buf,
-		fl:  newFreeList(totalSize),
+		buf:  buf,
+		fl:   newFreeList(totalSize),
+		flMu: make([]sync.Mutex, (totalSize-1)/flMuLength+1),
 	}
 	a.fl.setFree(0, h)
 	a.stats.TotalSize = totalSize
-	dispatcherCount := 1 << uint(HighBit(runtime.NumCPU())-1)
-	dispatcherCount /= 2
-	dispatcherLength := totalSize / dispatcherCount
-	for i := 0; i < dispatcherCount; i++ {
-		go a.dispatch(i*dispatcherLength, (i+1)*dispatcherLength)
-	}
+	go a.dispatch(0, totalSize)
 	runtime.Gosched()
 	return a
 }
 
 func AllocArena(totalSize int) *Arena {
 	if totalSize <= 0 {
-		return nil
+		panic(ErrSizeMustBePositive)
 	}
-	if totalSize != 1<<uint(HighBit(totalSize)-1) {
+	h := HighBit(totalSize) - 1
+	if totalSize != 1<<uint(h) {
 		panic(ErrSizeMustBePowerOfTwo)
+	}
+	if h < minHigh {
+		panic(ErrSizeMustBeGEMinLength)
 	}
 	buf := make([]byte, totalSize)
 	for i, j := 0, len(buf); i < j; i += 1024 {
@@ -87,6 +95,18 @@ func (a *Arena) dispatch(start, end int) {
 	}
 }
 
+func (a *Arena) flLock(offset, length int) {
+	for i, j := offset/flMuLength, (offset+length-1)/flMuLength; i <= j; i++ {
+		a.flMu[i].Lock()
+	}
+}
+
+func (a *Arena) flUnlock(offset, length int) {
+	for i, j := offset/flMuLength, (offset+length-1)/flMuLength; i <= j; i++ {
+		a.flMu[i].Unlock()
+	}
+}
+
 func (a *Arena) alloc(size int, block bool) []byte {
 	if size <= 0 {
 		return nil
@@ -98,19 +118,22 @@ func (a *Arena) alloc(size int, block bool) []byte {
 		length = 1 << uint(sizeHigh)
 		high = sizeHigh
 	}
+	flLockOffset, flLockLength := -1, -1
 	for foundOffset < 0 && high <= maxHigh {
 		select {
 		case offset = <-a.fl.queue[high-minHigh]:
 			h := a.fl.getFree(offset)
 			if h >= high {
-				a.mu.Lock()
+				l := 1 << uint(h)
+				flLockOffset, flLockLength = offset, l
+				a.flLock(flLockOffset, flLockLength)
 				h2 := a.fl.getFree(offset)
 				if h != h2 {
-					a.mu.Unlock()
+					a.flUnlock(flLockOffset, flLockLength)
 					continue
 				}
 				foundOffset = offset
-				foundLength = 1 << uint(h)
+				foundLength = l
 				foundHigh = h
 			}
 		default:
@@ -143,11 +166,11 @@ func (a *Arena) alloc(size int, block bool) []byte {
 	a.stats.AllocatedSize += length
 	if block {
 		a.stats.RequestedSize += length
-		a.mu.Unlock()
+		a.flUnlock(flLockOffset, flLockLength)
 		return a.buf[offset : offset+length]
 	}
 	a.stats.RequestedSize += size
-	a.mu.Unlock()
+	a.flUnlock(flLockOffset, flLockLength)
 	return a.buf[offset : offset+size]
 }
 
@@ -176,10 +199,11 @@ func (a *Arena) Free(ptr []byte) {
 	offset := ptrOffset
 	length := ptrLength
 	high := ptrHigh
-	a.mu.Lock()
+	flLockOffset, flLockLength := offset, length
+	a.flLock(flLockOffset, flLockLength)
 	h := a.fl.getAlloc(offset)
 	if h != high {
-		a.mu.Unlock()
+		a.flUnlock(flLockOffset, flLockLength)
 		panic(ErrInvalidPointer)
 	}
 	a.fl.setFree(offset, high)
@@ -209,14 +233,14 @@ func (a *Arena) Free(ptr []byte) {
 			}
 		}
 	}
-	a.mu.Unlock()
+	a.flUnlock(flLockOffset, flLockLength)
 	a.stats.AllocatedSize -= ptrLength
 	a.stats.RequestedSize -= ptrSize
 }
 
 func (a *Arena) Stats() (stats ArenaStats) {
-	a.mu.Lock()
+	//a.flMu.Lock()
 	stats = a.stats
-	a.mu.Unlock()
+	//a.flMu.Unlock()
 	return
 }

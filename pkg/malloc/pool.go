@@ -32,11 +32,7 @@ func (p *Pool) Grow(n int) int {
 	if n <= 0 {
 		panic(ErrSizeMustBePositive)
 	}
-	k := n / minLength
-	if n%minLength != 0 {
-		k++
-	}
-	n = k * minLength
+	n = ((n-1)/minLength + 1) * minLength
 	buf := make([]byte, n)
 	for i, j := 0, len(buf); i < j; i += 1024 {
 		buf[i] = 0

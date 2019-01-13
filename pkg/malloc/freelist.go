@@ -17,7 +17,7 @@ const (
 )
 
 func newFreeList(size int) *freeList {
-	count := size / minLength
+	count := (size-1)/minLength + 1
 	f := &freeList{
 		size:  size,
 		list:  make([]uint8, count, count+4),
