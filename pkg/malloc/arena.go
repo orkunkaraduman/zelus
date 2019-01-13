@@ -1,6 +1,7 @@
 package malloc
 
 import (
+	"os"
 	"runtime"
 	"sync"
 	"time"
@@ -8,16 +9,13 @@ import (
 )
 
 type Arena struct {
-	buf   []byte
-	fl    *freeList
-	flMu  []sync.Mutex
-	stats ArenaStats
+	buf        []byte
+	fl         *freeList
+	flMu       []sync.Mutex
+	flMuHigh   int
+	flMuLength int
+	stats      ArenaStats
 }
-
-const (
-	flMuHigh   = 30
-	flMuLength = 1 << flMuHigh
-)
 
 type ArenaStats struct {
 	TotalSize     int
@@ -37,10 +35,17 @@ func NewArena(buf []byte) *Arena {
 	if h < minHigh {
 		panic(ErrSizeMustBeGEMinLength)
 	}
+	flMuHigh := h - 4
+	if flMuHigh < minHigh {
+		flMuHigh = minHigh
+	}
+	flMuLength := 1 << uint(flMuHigh)
 	a := &Arena{
-		buf:  buf,
-		fl:   newFreeList(totalSize),
-		flMu: make([]sync.Mutex, (totalSize-1)/flMuLength+1),
+		buf:        buf,
+		fl:         newFreeList(totalSize),
+		flMu:       make([]sync.Mutex, (totalSize-1)/flMuLength+1),
+		flMuHigh:   flMuHigh,
+		flMuLength: flMuLength,
 	}
 	a.fl.setFree(0, h)
 	a.stats.TotalSize = totalSize
@@ -60,8 +65,9 @@ func AllocArena(totalSize int) *Arena {
 	if h < minHigh {
 		panic(ErrSizeMustBeGEMinLength)
 	}
+	pagesize := os.Getpagesize()
 	buf := make([]byte, totalSize)
-	for i, j := 0, len(buf); i < j; i += 1024 {
+	for i, j := 0, len(buf); i < j; i += pagesize {
 		buf[i] = 0
 	}
 	return NewArena(buf)
@@ -96,13 +102,13 @@ func (a *Arena) dispatch(start, end int) {
 }
 
 func (a *Arena) flLock(offset, length int) {
-	for i, j := offset/flMuLength, (offset+length-1)/flMuLength; i <= j; i++ {
+	for i, j := offset/a.flMuLength, (offset+length-1)/a.flMuLength; i <= j; i++ {
 		a.flMu[i].Lock()
 	}
 }
 
 func (a *Arena) flUnlock(offset, length int) {
-	for i, j := offset/flMuLength, (offset+length-1)/flMuLength; i <= j; i++ {
+	for i, j := offset/a.flMuLength, (offset+length-1)/a.flMuLength; i <= j; i++ {
 		a.flMu[i].Unlock()
 	}
 }

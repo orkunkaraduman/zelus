@@ -1,6 +1,7 @@
 package malloc
 
 import (
+	"os"
 	"sync"
 	"unsafe"
 )
@@ -32,9 +33,10 @@ func (p *Pool) Grow(n int) int {
 	if n <= 0 {
 		panic(ErrSizeMustBePositive)
 	}
+	pagesize := os.Getpagesize()
 	n = ((n-1)/minLength + 1) * minLength
 	buf := make([]byte, n)
-	for i, j := 0, len(buf); i < j; i += 1024 {
+	for i, j := 0, len(buf); i < j; i += pagesize {
 		buf[i] = 0
 	}
 	p.mu.Lock()
