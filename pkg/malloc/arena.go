@@ -1,6 +1,7 @@
 package malloc
 
 import (
+	"runtime"
 	"sync"
 	"time"
 	"unsafe"
@@ -34,7 +35,13 @@ func NewArena(buf []byte) *Arena {
 	}
 	a.fl.setFree(0, h)
 	a.stats.TotalSize = totalSize
-	go a.dispatch()
+	dispatcherCount := 1 << uint(HighBit(runtime.NumCPU())-1)
+	dispatcherCount /= 2
+	dispatcherLength := totalSize / dispatcherCount
+	for i := 0; i < dispatcherCount; i++ {
+		go a.dispatch(i*dispatcherLength, (i+1)*dispatcherLength)
+	}
+	runtime.Gosched()
 	return a
 }
 
@@ -52,11 +59,10 @@ func AllocArena(totalSize int) *Arena {
 	return NewArena(buf)
 }
 
-func (a *Arena) dispatch() {
-	bufLen := len(a.buf)
+func (a *Arena) dispatch(start, end int) {
 	for {
-		offset, length, high := 0, 1<<minHigh, minHigh
-		for offset < bufLen {
+		offset, length, high := start, 1<<minHigh, minHigh
+		for offset < end {
 			high = a.fl.get(offset)
 			if high < 0 {
 				offset += length
