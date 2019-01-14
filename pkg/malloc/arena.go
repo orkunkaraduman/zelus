@@ -4,6 +4,7 @@ import (
 	"os"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unsafe"
 )
@@ -18,9 +19,9 @@ type Arena struct {
 }
 
 type ArenaStats struct {
-	TotalSize     int
-	AllocatedSize int
-	RequestedSize int
+	TotalSize     int64
+	AllocatedSize int64
+	RequestedSize int64
 }
 
 func NewArena(buf []byte) *Arena {
@@ -35,9 +36,9 @@ func NewArena(buf []byte) *Arena {
 	if h < minHigh {
 		panic(ErrSizeMustBeGEMinLength)
 	}
-	flMuHigh := h - 4
-	if flMuHigh < minHigh {
-		flMuHigh = minHigh
+	flMuHigh := h - 6
+	if flMuHigh < 26 {
+		flMuHigh = 26
 	}
 	flMuLength := 1 << uint(flMuHigh)
 	a := &Arena{
@@ -48,7 +49,7 @@ func NewArena(buf []byte) *Arena {
 		flMuLength: flMuLength,
 	}
 	a.fl.setFree(0, h)
-	a.stats.TotalSize = totalSize
+	a.stats.TotalSize = int64(totalSize)
 	go a.dispatch(0, totalSize)
 	runtime.Gosched()
 	return a
@@ -133,8 +134,7 @@ func (a *Arena) alloc(size int, block bool) []byte {
 				l := 1 << uint(h)
 				flLockOffset, flLockLength = offset, l
 				a.flLock(flLockOffset, flLockLength)
-				h2 := a.fl.getFree(offset)
-				if h != h2 {
+				if a.fl.getFree(offset) != h {
 					a.flUnlock(flLockOffset, flLockLength)
 					continue
 				}
@@ -169,14 +169,13 @@ func (a *Arena) alloc(size int, block bool) []byte {
 	a.fl.setAlloc(foundOffset, foundHigh)
 	offset = foundOffset
 	length = foundLength
-	a.stats.AllocatedSize += length
+	a.flUnlock(flLockOffset, flLockLength)
+	atomic.AddInt64(&a.stats.AllocatedSize, int64(length))
 	if block {
-		a.stats.RequestedSize += length
-		a.flUnlock(flLockOffset, flLockLength)
+		atomic.AddInt64(&a.stats.RequestedSize, int64(length))
 		return a.buf[offset : offset+length]
 	}
-	a.stats.RequestedSize += size
-	a.flUnlock(flLockOffset, flLockLength)
+	atomic.AddInt64(&a.stats.RequestedSize, int64(size))
 	return a.buf[offset : offset+size]
 }
 
@@ -240,13 +239,11 @@ func (a *Arena) Free(ptr []byte) {
 		}
 	}
 	a.flUnlock(flLockOffset, flLockLength)
-	a.stats.AllocatedSize -= ptrLength
-	a.stats.RequestedSize -= ptrSize
+	atomic.AddInt64(&a.stats.AllocatedSize, -int64(ptrLength))
+	atomic.AddInt64(&a.stats.RequestedSize, -int64(ptrSize))
 }
 
 func (a *Arena) Stats() (stats ArenaStats) {
-	//a.flMu.Lock()
 	stats = a.stats
-	//a.flMu.Unlock()
 	return
 }

@@ -3,6 +3,7 @@ package malloc
 import (
 	"os"
 	"sync"
+	"sync/atomic"
 	"unsafe"
 )
 
@@ -13,9 +14,9 @@ type Pool struct {
 }
 
 type PoolStats struct {
-	TotalSize     int
-	AllocatedSize int
-	RequestedSize int
+	TotalSize     int64
+	AllocatedSize int64
+	RequestedSize int64
 }
 
 func NewPool() *Pool {
@@ -50,8 +51,8 @@ func (p *Pool) Grow(n int) int {
 		m += length
 		n -= length
 	}
-	p.stats.TotalSize += m
 	p.mu.Unlock()
+	atomic.AddInt64(&p.stats.TotalSize, int64(m))
 	return m
 }
 
@@ -60,13 +61,13 @@ func (p *Pool) alloc(size int, block bool) []byte {
 	var ptr []byte
 	for _, a := range p.arenas {
 		ss := a.Stats()
-		if ss.TotalSize-ss.AllocatedSize < size {
+		if ss.TotalSize-ss.AllocatedSize < int64(size) {
 			continue
 		}
 		ptr = a.alloc(size, block)
 		if ptr != nil {
-			p.stats.AllocatedSize += 1 << uint(HighBit(len(ptr)-1))
-			p.stats.RequestedSize += len(ptr)
+			atomic.AddInt64(&p.stats.AllocatedSize, 1<<uint(HighBit(len(ptr)-1)))
+			atomic.AddInt64(&p.stats.RequestedSize, int64(len(ptr)))
 			break
 		}
 	}
@@ -91,16 +92,14 @@ func (p *Pool) Free(ptr []byte) {
 		if uintptr(unsafe.Pointer(&ptr[0])) >= uintptr(unsafe.Pointer(&a.buf[0])) &&
 			uintptr(unsafe.Pointer(&ptr[0])) < uintptr(unsafe.Pointer(&a.buf[0]))+uintptr(len(a.buf)) {
 			a.Free(ptr)
-			p.stats.AllocatedSize -= 1 << uint(HighBit(len(ptr)-1))
-			p.stats.RequestedSize -= len(ptr)
+			atomic.AddInt64(&p.stats.AllocatedSize, -int64(1<<uint(HighBit(len(ptr)-1))))
+			atomic.AddInt64(&p.stats.RequestedSize, -int64(len(ptr)))
 		}
 	}
 	p.mu.RUnlock()
 }
 
 func (p *Pool) Stats() (stats PoolStats) {
-	p.mu.Lock()
 	stats = p.stats
-	p.mu.Unlock()
 	return
 }
