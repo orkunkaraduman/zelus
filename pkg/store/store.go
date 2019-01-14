@@ -1,13 +1,10 @@
 package store
 
 import (
-	"sync"
-
 	"github.com/orkunkaraduman/zelus/pkg/malloc"
 )
 
 type Store struct {
-	mu       sync.RWMutex
 	slots    []slot
 	slotPool *malloc.Pool
 	dataPool *malloc.Pool
@@ -26,17 +23,15 @@ func New(count int, size int) (st *Store) {
 	return
 }
 
-func (st *Store) Get(key string) (val []byte) {
-	st.mu.RLock()
-	defer st.mu.RUnlock()
+func (st *Store) Get(key string, buf []byte) (val []byte) {
 	bKey := getBKey(key)
 	keyHash := HashFunc(bKey)
 	slotIdx := keyHash % len(st.slots)
 	sl := &st.slots[slotIdx]
 	sl.Mu.Lock()
-	defer sl.Mu.Unlock()
 	ndIdx := sl.FindNode(keyHash, bKey)
 	if ndIdx < 0 {
+		sl.Mu.Unlock()
 		return
 	}
 	nd := &sl.Nodes[ndIdx]
@@ -46,8 +41,12 @@ func (st *Store) Get(key string) (val []byte) {
 	}
 	p := len(bKey)
 	l -= p
+	if len(buf) >= l {
+		val = buf[:l]
+	} else {
+		val = make([]byte, l)
+	}
 	m := 0
-	val = make([]byte, l)
 	for _, data := range nd.Datas {
 		n, r := 0, len(data)
 		if p != 0 {
@@ -61,30 +60,28 @@ func (st *Store) Get(key string) (val []byte) {
 			copy(val[m:], data[n:])
 		}
 	}
+	sl.Mu.Unlock()
 	return
 }
 
 func (st *Store) Set(key string, val []byte, replace bool) bool {
-	st.mu.RLock()
-	defer st.mu.RUnlock()
 	bKey := getBKey(key)
 	keyHash := HashFunc(bKey)
 	slotIdx := keyHash % len(st.slots)
 	sl := &st.slots[slotIdx]
 	sl.Mu.Lock()
-	defer sl.Mu.Unlock()
 	ndIdx := sl.FindNode(keyHash, bKey)
 	oldNdIdx := -1
 	if ndIdx >= 0 {
 		if !replace {
+			sl.Mu.Unlock()
 			return false
 		}
 		oldNdIdx = ndIdx
-		ndIdx = sl.NewNode(st.slotPool)
-	} else {
-		ndIdx = sl.NewNode(st.slotPool)
 	}
+	ndIdx = sl.NewNode(st.slotPool)
 	if ndIdx < 0 {
+		sl.Mu.Unlock()
 		return false
 	}
 	nd := &sl.Nodes[ndIdx]
@@ -92,10 +89,14 @@ func (st *Store) Set(key string, val []byte, replace bool) bool {
 	datasIdx := nd.Alloc(st.slotPool, st.dataPool, len(bKey)+len(val))
 	if datasIdx < 0 {
 		sl.DelNode(st.slotPool, st.dataPool, ndIdx)
+		sl.Mu.Unlock()
 		return false
 	}
 	j, m := 0, 0
 	for _, data := range nd.Datas {
+		if data == nil {
+			break
+		}
 		n := 0
 		if j < len(bKey) {
 			n = copy(data, bKey)
@@ -108,47 +109,46 @@ func (st *Store) Set(key string, val []byte, replace bool) bool {
 	if oldNdIdx >= 0 {
 		sl.DelNode(st.slotPool, st.dataPool, oldNdIdx)
 	}
+	sl.Mu.Unlock()
 	return true
 }
 
 func (st *Store) Append(key string, val []byte) bool {
-	st.mu.RLock()
-	defer st.mu.RUnlock()
 	bKey := getBKey(key)
 	keyHash := HashFunc(bKey)
 	slotIdx := keyHash % len(st.slots)
 	sl := &st.slots[slotIdx]
 	sl.Mu.Lock()
-	defer sl.Mu.Unlock()
 	ndIdx := sl.FindNode(keyHash, bKey)
 	if ndIdx < 0 {
+		sl.Mu.Unlock()
 		return false
 	}
 	nd := &sl.Nodes[ndIdx]
 	datasIdx := nd.Alloc(st.slotPool, st.dataPool, len(val))
 	if datasIdx < 0 {
+		sl.Mu.Unlock()
 		return false
 	}
-	valIdx := 0
-	for _, data := range nd.Datas {
-		valIdx += copy(data, val[valIdx:])
+	for valIdx, valLen, i := 0, len(val), datasIdx; valIdx < valLen; i++ {
+		valIdx += copy(nd.Datas[i], val[valIdx:])
 	}
+	sl.Mu.Unlock()
 	return true
 }
 
 func (st *Store) Del(key string) bool {
-	st.mu.RLock()
-	defer st.mu.RUnlock()
 	bKey := getBKey(key)
 	keyHash := HashFunc(bKey)
 	slotIdx := keyHash % len(st.slots)
 	sl := &st.slots[slotIdx]
 	sl.Mu.Lock()
-	defer sl.Mu.Unlock()
 	ndIdx := sl.FindNode(keyHash, bKey)
 	if ndIdx < 0 {
+		sl.Mu.Unlock()
 		return false
 	}
 	sl.DelNode(st.slotPool, st.dataPool, ndIdx)
+	sl.Mu.Unlock()
 	return true
 }

@@ -68,9 +68,10 @@ func get(st *store.Store, start, stop int) {
 		keys[i-start] = fmt.Sprintf("%d", i)
 	}
 	fmt.Println(time.Now(), "get start")
+	var buf [10 * 4096]byte
 	i, r := 0, true
 	for i = start; i < stop; i++ {
-		p := st.Get(keys[i-start])
+		p := st.Get(keys[i-start], buf[:])
 		if p == nil {
 			r = false
 			break
