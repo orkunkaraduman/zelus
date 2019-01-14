@@ -25,7 +25,7 @@ func TestArena(t *testing.T) {
 		i++
 	}
 	t.Logf("Allocated: count=%d size=%d freelistCount=%d freelistSize=%d %d", i, requested, a.fl.filledCount(), a.fl.filledSize(), a.Stats().AllocatedSize)
-	if a.Stats().RequestedSize != requested {
+	if int(a.Stats().RequestedSize) != requested {
 		t.Error("Stats error")
 		t.FailNow()
 	}

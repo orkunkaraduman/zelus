@@ -25,7 +25,7 @@ func TestPool(t *testing.T) {
 		i++
 	}
 	t.Logf("Allocated: count=%d size=%d", i, requested)
-	if p.Stats().RequestedSize != requested {
+	if int(p.Stats().RequestedSize) != requested {
 		t.Error("Stats error")
 		t.FailNow()
 	}

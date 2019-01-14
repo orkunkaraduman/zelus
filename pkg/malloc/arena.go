@@ -33,7 +33,7 @@ func NewArena(buf []byte) *Arena {
 	if totalSize != 1<<uint(h) {
 		panic(ErrSizeMustBePowerOfTwo)
 	}
-	if h < minHigh {
+	if h < MinHigh {
 		panic(ErrSizeMustBeGEMinLength)
 	}
 	flMuHigh := h - 6
@@ -63,7 +63,7 @@ func AllocArena(totalSize int) *Arena {
 	if totalSize != 1<<uint(h) {
 		panic(ErrSizeMustBePowerOfTwo)
 	}
-	if h < minHigh {
+	if h < MinHigh {
 		panic(ErrSizeMustBeGEMinLength)
 	}
 	pagesize := os.Getpagesize()
@@ -76,7 +76,7 @@ func AllocArena(totalSize int) *Arena {
 
 func (a *Arena) dispatch(start, end int) {
 	for {
-		offset, length, high := start, 1<<minHigh, minHigh
+		offset, length, high := start, 1<<MinHigh, MinHigh
 		for offset < end {
 			high = a.fl.get(offset)
 			if high < 0 {
@@ -86,7 +86,7 @@ func (a *Arena) dispatch(start, end int) {
 			allocated := high&freeListAlloc != 0
 			high &= 0x3f
 			length = 1 << uint(high)
-			c := a.fl.queue[high-minHigh]
+			c := a.fl.queue[high-MinHigh]
 			if !allocated {
 				select {
 				case c <- offset:
@@ -120,15 +120,15 @@ func (a *Arena) alloc(size int, block bool) []byte {
 	}
 	sizeHigh := HighBit(size - 1)
 	foundOffset, foundLength, foundHigh := -1, 0, -1
-	offset, length, high := -1, 1<<minHigh, minHigh
+	offset, length, high := -1, 1<<MinHigh, MinHigh
 	if sizeHigh > high {
 		length = 1 << uint(sizeHigh)
 		high = sizeHigh
 	}
 	flLockOffset, flLockLength := -1, -1
-	for foundOffset < 0 && high <= maxHigh {
+	for foundOffset < 0 && high <= MaxHigh {
 		select {
-		case offset = <-a.fl.queue[high-minHigh]:
+		case offset = <-a.fl.queue[high-MinHigh]:
 			h := a.fl.getFree(offset)
 			if h >= high {
 				l := 1 << uint(h)
@@ -156,7 +156,7 @@ func (a *Arena) alloc(size int, block bool) []byte {
 	high = foundHigh
 	starting := foundOffset
 	for offset > starting {
-		if high > sizeHigh && high > minHigh {
+		if high > sizeHigh && high > MinHigh {
 			high--
 			length >>= 1
 		}
@@ -197,8 +197,8 @@ func (a *Arena) Free(ptr []byte) {
 		return
 	}
 	ptrHigh := HighBit(ptrSize - 1)
-	if ptrHigh < minHigh {
-		ptrHigh = minHigh
+	if ptrHigh < MinHigh {
+		ptrHigh = MinHigh
 	}
 	ptrLength := 1 << uint(ptrHigh)
 	offset := ptrOffset

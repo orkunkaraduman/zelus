@@ -1,9 +1,9 @@
 package malloc
 
-const minHigh = 4
-const minLength = 1 << minHigh
-const maxHigh = 62
-const maxLength = 1 << maxHigh
+const MinHigh = 4
+const MinLength = 1 << MinHigh
+const MaxHigh = 62
+const MaxLength = 1 << MaxHigh
 
 func HighBit(x int) int {
 	r := 0

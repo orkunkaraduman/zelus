@@ -17,11 +17,11 @@ const (
 )
 
 func newFreeList(size int) *freeList {
-	count := (size-1)/minLength + 1
+	count := (size-1)/MinLength + 1
 	f := &freeList{
 		size:  size,
 		list:  make([]uint8, count, count+4),
-		queue: make([]chan int, maxHigh-minHigh+1),
+		queue: make([]chan int, MaxHigh-MinHigh+1),
 	}
 	for i := range f.list {
 		f.list[i] = 0xff
@@ -53,7 +53,7 @@ func (f *freeList) filledSize() int {
 }
 
 func (f *freeList) getFree(offset int) int {
-	i := offset / minLength
+	i := offset / MinLength
 	if i >= len(f.list) {
 		return -1
 	}
@@ -65,17 +65,17 @@ func (f *freeList) getFree(offset int) int {
 }
 
 func (f *freeList) setFree(offset int, high int) {
-	i := offset / minLength
+	i := offset / MinLength
 	v := uint8(high & 0x3f)
 	f.list[i] = v
 	select {
-	case f.queue[v-minHigh] <- offset:
+	case f.queue[v-MinHigh] <- offset:
 	default:
 	}
 }
 
 func (f *freeList) getAlloc(offset int) int {
-	i := offset / minLength
+	i := offset / MinLength
 	if i >= len(f.list) {
 		return -1
 	}
@@ -87,13 +87,13 @@ func (f *freeList) getAlloc(offset int) int {
 }
 
 func (f *freeList) setAlloc(offset int, high int) {
-	i := offset / minLength
+	i := offset / MinLength
 	v := uint8(high & 0x3f)
 	f.list[i] = v | freeListAlloc
 }
 
 func (f *freeList) get(offset int) int {
-	i := offset / minLength
+	i := offset / MinLength
 	if i >= len(f.list) {
 		return -1
 	}
@@ -105,6 +105,6 @@ func (f *freeList) get(offset int) int {
 }
 
 func (f *freeList) del(offset int) {
-	i := offset / minLength
+	i := offset / MinLength
 	f.list[i] = 0xff
 }

@@ -83,7 +83,7 @@ func (nd *node) Alloc(slotPool, dataPool *malloc.Pool, size int) int {
 	datas := [][]byte(nil)
 	for size > 0 {
 		var ptr []byte
-		for l := 1 << uint(malloc.HighBit(size)-1); l > 0 && ptr == nil; l >>= 1 {
+		for l := 1 << uint(malloc.HighBit(size)-1); l > malloc.MinLength && ptr == nil; l >>= 1 {
 			ptr = dataPool.Alloc(l)
 		}
 		if ptr == nil {
@@ -91,6 +91,13 @@ func (nd *node) Alloc(slotPool, dataPool *malloc.Pool, size int) int {
 		}
 		datas = append(datas, ptr)
 		size -= len(ptr)
+	}
+	if size < malloc.MinLength {
+		ptr := dataPool.Alloc(size)
+		if ptr != nil {
+			datas = append(datas, ptr)
+			size -= len(ptr)
+		}
 	}
 	if size > 0 {
 		for _, ptr := range datas {
@@ -105,19 +112,19 @@ func (nd *node) Alloc(slotPool, dataPool *malloc.Pool, size int) int {
 		idx--
 	}
 	newDatas := nd.Datas
-	newLen := idx + len(datas)
-	if newLen > len(nd.Datas) {
-		ptr := slotPool.AllocBlock(newLen * sizeOfData)
+	newDatasLen := idx + len(datas)
+	if newDatasLen > len(nd.Datas) {
+		ptr := slotPool.AllocBlock(newDatasLen * sizeOfData)
 		if ptr == nil {
 			return -1
 		}
 		newDatas = (*[^uint32(0) >> 1][]byte)(unsafe.Pointer(&ptr[0]))[:len(ptr)/sizeOfData]
-		newLen = len(newDatas)
+		newDatasLen = len(newDatas)
 		for i := 0; i < idx; i++ {
 			newDatas[i] = nd.Datas[i]
 		}
 	}
-	for i, k, l := idx, 0, len(datas); i < newLen; i++ {
+	for i, k, l := idx, 0, len(datas); i < newDatasLen; i++ {
 		if k < l {
 			newDatas[i] = datas[k]
 			k++

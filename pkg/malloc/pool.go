@@ -35,7 +35,7 @@ func (p *Pool) Grow(n int) int {
 		panic(ErrSizeMustBePositive)
 	}
 	pagesize := os.Getpagesize()
-	n = ((n-1)/minLength + 1) * minLength
+	n = ((n-1)/MinLength + 1) * MinLength
 	buf := make([]byte, n)
 	for i, j := 0, len(buf); i < j; i += pagesize {
 		buf[i] = 0
@@ -44,8 +44,8 @@ func (p *Pool) Grow(n int) int {
 	m := 0
 	for n > 0 {
 		length := 1 << uint(HighBit(n)-1)
-		if length < minLength {
-			length = minLength
+		if length < MinLength {
+			length = MinLength
 		}
 		p.arenas = append(p.arenas, NewArena(buf[m:m+length]))
 		m += length
