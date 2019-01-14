@@ -71,7 +71,17 @@ func (sl *slot) DelNode(slotPool, dataPool *malloc.Pool, idx int) {
 	nd := &sl.Nodes[idx]
 	nd.KeyHash = -1
 	nd.Free(slotPool, dataPool)
-	//! free node array
+	var zeroNode node
+	sizeOfNode := int(unsafe.Sizeof(zeroNode))
+	for i := range sl.Nodes {
+		if sl.Nodes[i].KeyHash >= 0 {
+			return
+		}
+	}
+	if sl.Nodes != nil {
+		slotPool.Free((*[^uint32(0) >> 1]byte)(unsafe.Pointer(&sl.Nodes[0]))[:len(sl.Nodes)*sizeOfNode][:])
+		sl.Nodes = nil
+	}
 }
 
 type node struct {
