@@ -6,27 +6,31 @@ import (
 	"net"
 	"os"
 
-	. "github.com/orkunkaraduman/go-accepter"
+	accepter "github.com/orkunkaraduman/go-accepter"
 	"github.com/orkunkaraduman/zelus/pkg/store"
 )
 
 type Server struct {
 	st *store.Store
-	ac *Accepter
+	ac *accepter.Accepter
 }
 
 func New(st *store.Store) (srv *Server) {
 	srv = &Server{
 		st: st,
 	}
-	srv.ac = &Accepter{
-		Handler:  HandlerFunc(srv.serve),
+	srv.ac = &accepter.Accepter{
+		Handler:  accepter.HandlerFunc(srv.serve),
 		ErrorLog: log.New(os.Stdout, "", log.LstdFlags),
 	}
 	return
 }
 
-func (srv *Server) ListenAndServe(addr string) error {
+func (srv *Server) Serve(l net.Listener) error {
+	return srv.ac.Serve(l)
+}
+
+func (srv *Server) TCPListenAndServe(addr string) error {
 	return srv.ac.TCPListenAndServe(addr)
 }
 
@@ -35,7 +39,18 @@ func (srv *Server) Shutdown(ctx context.Context) error {
 }
 
 func (srv *Server) serve(conn net.Conn, closeCh <-chan struct{}) {
-	cn := newClientConn(conn)
-	cn.st = srv.st
-	cn.Serve(cn, closeCh)
+	/*if tcpConn, ok := conn.(*net.TCPConn); ok {
+		var err error
+		err = tcpConn.SetReadBuffer(1 * 1024 * 1024)
+		if err != nil {
+			panic(err)
+		}
+		err = tcpConn.SetWriteBuffer(1 * 1024 * 1024)
+		if err != nil {
+			panic(err)
+		}
+	}*/
+	cs := newConnState(conn)
+	cs.st = srv.st
+	cs.Serve(cs, closeCh)
 }
