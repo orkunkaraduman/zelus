@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"strconv"
+	"sync"
 )
 
 const (
@@ -17,67 +18,101 @@ var (
 )
 
 type Protocol struct {
-	rd      *bufio.Reader
-	wr      *bufio.Writer
-	closeCh chan struct{}
+	rd        *bufio.Reader
+	wr        *bufio.Writer
+	wrMu      sync.Mutex
+	closeCh   chan struct{}
+	cmdParser *CmdParser
 }
 
 func New(r io.Reader, w io.Writer) (prt *Protocol) {
 	prt = &Protocol{
-		rd:      bufio.NewReader(r),
-		wr:      bufio.NewWriter(w),
-		closeCh: make(chan struct{}, 1),
+		rd:        bufio.NewReaderSize(r, 128*1024),
+		wr:        bufio.NewWriterSize(w, 128*1024),
+		closeCh:   make(chan struct{}, 1),
+		cmdParser: NewCmdParser(),
 	}
 	return
 }
 
 func (prt *Protocol) Close() {
-	prt.closeCh <- struct{}{}
+	select {
+	case prt.closeCh <- struct{}{}:
+	default:
+	}
 }
 
-func (prt *Protocol) SendLine(line string) {
-	var err error
-	_, err = prt.wr.Write([]byte(line))
+func (prt *Protocol) SendCmd(cmd Cmd) (err error) {
+	prt.wrMu.Lock()
+	var b []byte
+	b, err = prt.cmdParser.Serialize(cmd)
 	if err != nil {
-		panic(ErrIO)
+		err = ErrProtocol
+		prt.wrMu.Unlock()
+		return
+	}
+	_, err = prt.wr.Write(b)
+	if err != nil {
+		err = ErrIO
+		prt.wrMu.Unlock()
+		return
 	}
 	_, err = prt.wr.Write([]byte("\r\n"))
 	if err != nil {
-		panic(ErrIO)
+		err = ErrIO
+		prt.wrMu.Unlock()
+		return
 	}
-	err = prt.wr.Flush()
-	if err != nil {
-		panic(ErrIO)
-	}
+	prt.wrMu.Unlock()
 	return
 }
 
-func (prt *Protocol) SendData(data []byte) {
-	var err error
+func (prt *Protocol) SendData(data []byte) (err error) {
+	prt.wrMu.Lock()
 	_, err = prt.wr.Write([]byte("\r\n"))
 	if err != nil {
-		panic(ErrIO)
+		err = ErrIO
+		prt.wrMu.Unlock()
+		return
 	}
 	_, err = prt.wr.Write([]byte(strconv.Itoa(len(data))))
 	if err != nil {
-		panic(ErrIO)
+		err = ErrIO
+		prt.wrMu.Unlock()
+		return
 	}
 	_, err = prt.wr.Write([]byte("\r\n"))
 	if err != nil {
-		panic(ErrIO)
+		err = ErrIO
+		prt.wrMu.Unlock()
+		return
 	}
 	_, err = prt.wr.Write(data)
 	if err != nil {
-		panic(ErrIO)
+		err = ErrIO
+		prt.wrMu.Unlock()
+		return
 	}
 	_, err = prt.wr.Write([]byte("\r\n"))
 	if err != nil {
-		panic(ErrIO)
+		err = ErrIO
+		prt.wrMu.Unlock()
+		return
 	}
+	prt.wrMu.Unlock()
+	return
+}
+
+func (prt *Protocol) Flush() (err error) {
+	prt.wrMu.Lock()
 	err = prt.wr.Flush()
 	if err != nil {
-		panic(ErrIO)
+		err = ErrIO
+		prt.wrMu.Unlock()
+		return
 	}
+	prt.wrMu.Unlock()
+	return
 }
 
 func (prt *Protocol) Serve(state State, closeCh <-chan struct{}) {
@@ -115,11 +150,16 @@ func (prt *Protocol) Serve(state State, closeCh <-chan struct{}) {
 		if len(line) == 0 {
 			panic(ErrProtocol)
 		}
-		var dataCount int
-		dataCount = state.OnReadLine(string(line))
+		var cmd Cmd
+		cmd, err = prt.cmdParser.Parse(line)
+		if err != nil {
+			panic(ErrProtocol)
+		}
+		var count int
+		count = state.OnReadCmd(cmd)
 
 		// read datas
-		for i := 0; i < dataCount; i++ {
+		for i := 0; i < count; i++ {
 			// read data header
 			line, err = readBytesLimit(prt.rd, '\n', MaxLineLen)
 			if err != nil {
@@ -171,6 +211,10 @@ func (prt *Protocol) Serve(state State, closeCh <-chan struct{}) {
 				panic(ErrProtocol)
 			}
 			state.OnReadData(data)
+		}
+		err = prt.Flush()
+		if err != nil {
+			panic(err)
 		}
 	}
 }

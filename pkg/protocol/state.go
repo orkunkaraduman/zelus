@@ -1,7 +1,7 @@
 package protocol
 
 type State interface {
-	OnReadLine(line string) (dataCount int)
+	OnReadCmd(cmd Cmd) (count int)
 	OnReadData(data []byte)
 	OnQuit(e error)
 }
