@@ -84,8 +84,7 @@ func (st *Store) Set(key string, val []byte, replace bool) bool {
 	}
 	nd := &sl.Nodes[ndIdx]
 	nd.KeyHash = keyHash
-	datasIdx := nd.Alloc(st.slotPool, st.dataPool, len(bKey)+len(val)-nd.Size)
-	if datasIdx < 0 {
+	if !nd.Set(st.slotPool, st.dataPool, len(bKey)+len(val)) {
 		if foundNdIdx < 0 {
 			sl.DelNode(st.slotPool, st.dataPool, ndIdx)
 		}
@@ -138,13 +137,16 @@ func (st *Store) Append(key string, val []byte) bool {
 		return false
 	}
 	nd := &sl.Nodes[ndIdx]
-	datasIdx := nd.Alloc(st.slotPool, st.dataPool, len(val))
-	if datasIdx < 0 {
+	index, offset := nd.Last()
+	if !nd.Alloc(st.slotPool, st.dataPool, len(val)) {
 		sl.Mu.Unlock()
 		return false
 	}
-	for valIdx, valLen, i := 0, len(val), datasIdx; valIdx < valLen; i++ {
-		valIdx += copy(nd.Datas[i], val[valIdx:])
+	valIdx, valLen := 0, len(val)
+	for valIdx < valLen {
+		valIdx += copy(nd.Datas[index][offset:], val[valIdx:])
+		index++
+		offset = 0
 	}
 	sl.Mu.Unlock()
 	return true

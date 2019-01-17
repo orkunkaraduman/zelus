@@ -95,13 +95,11 @@ type node struct {
 	Size    int
 }
 
-func (nd *node) Alloc(slotPool, dataPool *malloc.Pool, size int) int {
+func (nd *node) Alloc(slotPool, dataPool *malloc.Pool, size int) bool {
 	firstSize := size
-	if firstSize <= 0 {
-		return len(nd.Datas)
-	}
+	ndl := len(nd.Datas)
 	size -= malloc.MinLength - (nd.Size-1)%malloc.MinLength - 1
-	datas := [][]byte(nil)
+	datas := make([][]byte, 0, 256)
 	for size > 0 {
 		var ptr []byte
 		for l := 1 << uint(malloc.HighBit(size)-1); l >= malloc.MinLength && ptr == nil; l >>= 1 {
@@ -124,23 +122,23 @@ func (nd *node) Alloc(slotPool, dataPool *malloc.Pool, size int) int {
 		for _, ptr := range datas {
 			dataPool.Free(ptr)
 		}
-		return -1
+		return false
 	}
 	var zeroData []byte
 	sizeOfData := int(unsafe.Sizeof(zeroData))
-	idx := len(nd.Datas)
+	idx := ndl
 	for idx > 0 && nd.Datas[idx-1] == nil {
 		idx--
 	}
 	newDatas := nd.Datas
 	newDatasLen := idx + len(datas)
-	if newDatasLen > len(nd.Datas) {
+	if newDatasLen > ndl {
 		ptr := slotPool.AllocBlock(newDatasLen * sizeOfData)
 		if ptr == nil {
 			for _, ptr := range datas {
 				dataPool.Free(ptr)
 			}
-			return -1
+			return false
 		}
 		newDatas = (*[^uint32(0) >> 1][]byte)(unsafe.Pointer(&ptr[0]))[:len(ptr)/sizeOfData]
 		newDatasLen = len(newDatas)
@@ -160,11 +158,31 @@ func (nd *node) Alloc(slotPool, dataPool *malloc.Pool, size int) int {
 		}
 	}
 	if nd.Datas != nil && &nd.Datas[0] != &newDatas[0] {
-		slotPool.Free((*[^uint32(0) >> 1]byte)(unsafe.Pointer(&nd.Datas[0]))[:len(nd.Datas)*sizeOfData][:])
+		slotPool.Free((*[^uint32(0) >> 1]byte)(unsafe.Pointer(&nd.Datas[0]))[:ndl*sizeOfData][:])
 	}
 	nd.Datas = newDatas
 	nd.Size += firstSize
-	return idx
+	return true
+}
+
+func (nd *node) Set(slotPool, dataPool *malloc.Pool, size int) bool {
+	if nd.Size == size {
+		return true
+	}
+	if size > nd.Size {
+		return nd.Alloc(slotPool, dataPool, size-nd.Size)
+	}
+	sz := 0
+	for i, j := 0, len(nd.Datas); i < j; i++ {
+		if sz >= size {
+			dataPool.Free(nd.Datas[i])
+			nd.Datas[i] = nil
+			continue
+		}
+		sz += len(nd.Datas[i])
+	}
+	nd.Size = size
+	return true
 }
 
 func (nd *node) Free(slotPool, dataPool *malloc.Pool) {
@@ -177,4 +195,18 @@ func (nd *node) Free(slotPool, dataPool *malloc.Pool) {
 		slotPool.Free((*[^uint32(0) >> 1]byte)(unsafe.Pointer(&nd.Datas[0]))[:len(nd.Datas)*sizeOfData][:])
 	}
 	nd.Datas = nil
+}
+
+func (nd *node) Last() (index, offset int) {
+	index = -1
+	offset = nd.Size
+	for i, data := range nd.Datas {
+		dl := len(data)
+		if offset <= dl {
+			index = i
+			return
+		}
+		offset -= dl
+	}
+	return
 }

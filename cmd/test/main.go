@@ -122,10 +122,9 @@ func main() {
 		time.Sleep(1 * time.Second)
 		wg.Wait()
 		runtime.Gosched()
-		continue
 
 		for i := 0; i < 4; i++ {
-			go del(st, i*1*1024*1024*1024/4096, (i+1)*1*1024*1024*1024/4096)
+			go del(st, i*2*1024*1024*1024/4096, (i+1)*2*1024*1024*1024/4096)
 		}
 		time.Sleep(1 * time.Second)
 		wg.Wait()
