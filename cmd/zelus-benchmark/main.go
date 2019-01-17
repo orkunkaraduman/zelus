@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
@@ -41,8 +42,9 @@ func run(start, stop int) {
 		}
 	}
 	fmt.Println(time.Now(), "end")
-	cl.Close()
-	cl.Close()
+	ctx, cf := context.WithDeadline(context.Background(), time.Now().Add(1*time.Second))
+	cl.Shutdown(ctx)
+	cf()
 	wg.Done()
 }
 

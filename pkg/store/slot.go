@@ -62,6 +62,7 @@ func (sl *slot) NewNode(slotPool *malloc.Pool) int {
 		} else {
 			newNodes[i].KeyHash = -1
 			newNodes[i].Datas = nil
+			newNodes[i].Size = 0
 		}
 	}
 	if sl.Nodes != nil {
@@ -91,14 +92,20 @@ func (sl *slot) DelNode(slotPool, dataPool *malloc.Pool, idx int) {
 type node struct {
 	KeyHash int
 	Datas   [][]byte
+	Size    int
 }
 
 func (nd *node) Alloc(slotPool, dataPool *malloc.Pool, size int) int {
+	firstSize := size
+	if firstSize <= 0 {
+		return len(nd.Datas)
+	}
+	size -= malloc.MinLength - (nd.Size-1)%malloc.MinLength - 1
 	datas := [][]byte(nil)
 	for size > 0 {
 		var ptr []byte
-		for l := 1 << uint(malloc.HighBit(size)-1); l > malloc.MinLength && ptr == nil; l >>= 1 {
-			ptr = dataPool.Alloc(l)
+		for l := 1 << uint(malloc.HighBit(size)-1); l >= malloc.MinLength && ptr == nil; l >>= 1 {
+			ptr = dataPool.AllocBlock(l)
 		}
 		if ptr == nil {
 			break
@@ -106,8 +113,8 @@ func (nd *node) Alloc(slotPool, dataPool *malloc.Pool, size int) int {
 		datas = append(datas, ptr)
 		size -= len(ptr)
 	}
-	if size < malloc.MinLength {
-		ptr := dataPool.Alloc(size)
+	if size > 0 && size < malloc.MinLength {
+		ptr := dataPool.AllocBlock(size)
 		if ptr != nil {
 			datas = append(datas, ptr)
 			size -= len(ptr)
@@ -130,6 +137,9 @@ func (nd *node) Alloc(slotPool, dataPool *malloc.Pool, size int) int {
 	if newDatasLen > len(nd.Datas) {
 		ptr := slotPool.AllocBlock(newDatasLen * sizeOfData)
 		if ptr == nil {
+			for _, ptr := range datas {
+				dataPool.Free(ptr)
+			}
 			return -1
 		}
 		newDatas = (*[^uint32(0) >> 1][]byte)(unsafe.Pointer(&ptr[0]))[:len(ptr)/sizeOfData]
@@ -153,6 +163,7 @@ func (nd *node) Alloc(slotPool, dataPool *malloc.Pool, size int) int {
 		slotPool.Free((*[^uint32(0) >> 1]byte)(unsafe.Pointer(&nd.Datas[0]))[:len(nd.Datas)*sizeOfData][:])
 	}
 	nd.Datas = newDatas
+	nd.Size += firstSize
 	return idx
 }
 

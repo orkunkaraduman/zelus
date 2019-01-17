@@ -35,10 +35,7 @@ func (st *Store) Get(key string, buf []byte) (val []byte) {
 		return
 	}
 	nd := &sl.Nodes[ndIdx]
-	l := 0
-	for _, data := range nd.Datas {
-		l += len(data)
-	}
+	l := nd.Size
 	p := len(bKey)
 	l -= p
 	if len(buf) >= l {
@@ -70,25 +67,28 @@ func (st *Store) Set(key string, val []byte, replace bool) bool {
 	slotIdx := keyHash % len(st.slots)
 	sl := &st.slots[slotIdx]
 	sl.Mu.Lock()
-	ndIdx := sl.FindNode(keyHash, bKey)
-	oldNdIdx := -1
-	if ndIdx >= 0 {
+	ndIdx := -1
+	foundNdIdx := sl.FindNode(keyHash, bKey)
+	if foundNdIdx >= 0 {
 		if !replace {
 			sl.Mu.Unlock()
 			return false
 		}
-		oldNdIdx = ndIdx
+		ndIdx = foundNdIdx
+	} else {
+		ndIdx = sl.NewNode(st.slotPool)
 	}
-	ndIdx = sl.NewNode(st.slotPool)
 	if ndIdx < 0 {
 		sl.Mu.Unlock()
 		return false
 	}
 	nd := &sl.Nodes[ndIdx]
 	nd.KeyHash = keyHash
-	datasIdx := nd.Alloc(st.slotPool, st.dataPool, len(bKey)+len(val))
+	datasIdx := nd.Alloc(st.slotPool, st.dataPool, len(bKey)+len(val)-nd.Size)
 	if datasIdx < 0 {
-		sl.DelNode(st.slotPool, st.dataPool, ndIdx)
+		if foundNdIdx < 0 {
+			sl.DelNode(st.slotPool, st.dataPool, ndIdx)
+		}
 		sl.Mu.Unlock()
 		return false
 	}
@@ -106,9 +106,22 @@ func (st *Store) Set(key string, val []byte, replace bool) bool {
 			m += copy(data[n:], val[m:])
 		}
 	}
-	if oldNdIdx >= 0 {
-		sl.DelNode(st.slotPool, st.dataPool, oldNdIdx)
+	sl.Mu.Unlock()
+	return true
+}
+
+func (st *Store) Del(key string) bool {
+	bKey := getBKey(key)
+	keyHash := HashFunc(bKey)
+	slotIdx := keyHash % len(st.slots)
+	sl := &st.slots[slotIdx]
+	sl.Mu.Lock()
+	ndIdx := sl.FindNode(keyHash, bKey)
+	if ndIdx < 0 {
+		sl.Mu.Unlock()
+		return false
 	}
+	sl.DelNode(st.slotPool, st.dataPool, ndIdx)
 	sl.Mu.Unlock()
 	return true
 }
@@ -133,22 +146,6 @@ func (st *Store) Append(key string, val []byte) bool {
 	for valIdx, valLen, i := 0, len(val), datasIdx; valIdx < valLen; i++ {
 		valIdx += copy(nd.Datas[i], val[valIdx:])
 	}
-	sl.Mu.Unlock()
-	return true
-}
-
-func (st *Store) Del(key string) bool {
-	bKey := getBKey(key)
-	keyHash := HashFunc(bKey)
-	slotIdx := keyHash % len(st.slots)
-	sl := &st.slots[slotIdx]
-	sl.Mu.Lock()
-	ndIdx := sl.FindNode(keyHash, bKey)
-	if ndIdx < 0 {
-		sl.Mu.Unlock()
-		return false
-	}
-	sl.DelNode(st.slotPool, st.dataPool, ndIdx)
 	sl.Mu.Unlock()
 	return true
 }

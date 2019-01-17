@@ -206,8 +206,7 @@ func (a *Arena) Free(ptr []byte) {
 	high := ptrHigh
 	flLockOffset, flLockLength := offset, length
 	a.flLock(flLockOffset, flLockLength)
-	h := a.fl.getAlloc(offset)
-	if h != high {
+	if a.fl.getAlloc(offset) != high {
 		a.flUnlock(flLockOffset, flLockLength)
 		panic(ErrInvalidPointer)
 	}
