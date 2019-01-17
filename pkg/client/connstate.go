@@ -61,7 +61,7 @@ func (cs *connState) OnReadCmd(cmd protocol.Cmd) (count int) {
 			return
 		}
 	}
-	panic(protocol.ErrProtocol)
+	panic(&protocol.Error{Err: ErrUnknownCommand, Cmd: cs.rCmd})
 }
 
 func (cs *connState) OnReadData(data []byte) {
@@ -81,8 +81,8 @@ func (cs *connState) OnReadData(data []byte) {
 func (cs *connState) OnQuit(e error) {
 	close(cs.resultQueue)
 	if e != nil {
-		if e != protocol.ErrIO {
-			cs.SendCmd(protocol.Cmd{Name: "ERROR", Args: []string{e.Error()}})
+		if e, ok := e.(*protocol.Error); ok {
+			cs.SendCmd(protocol.Cmd{Name: "ERROR", Args: []string{e.Err.Error()}})
 			cs.Flush()
 		}
 		return

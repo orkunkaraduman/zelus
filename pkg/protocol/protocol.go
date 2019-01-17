@@ -2,7 +2,7 @@ package protocol
 
 import (
 	"bufio"
-	"errors"
+	"encoding/csv"
 	"io"
 	"strconv"
 	"sync"
@@ -10,11 +10,6 @@ import (
 
 const (
 	MaxLineLen = 4096
-)
-
-var (
-	ErrProtocol = errors.New("protocol error")
-	ErrIO       = errors.New("IO error")
 )
 
 type Protocol struct {
@@ -47,19 +42,19 @@ func (prt *Protocol) SendCmd(cmd Cmd) (err error) {
 	var b []byte
 	b, err = prt.cmdParser.Serialize(cmd)
 	if err != nil {
-		err = ErrProtocol
+		if _, ok := err.(*csv.ParseError); ok {
+			err = &Error{Err: ErrProtocol}
+		}
 		prt.wrMu.Unlock()
 		return
 	}
 	_, err = prt.wr.Write(b)
 	if err != nil {
-		err = ErrIO
 		prt.wrMu.Unlock()
 		return
 	}
 	_, err = prt.wr.Write([]byte("\r\n"))
 	if err != nil {
-		err = ErrIO
 		prt.wrMu.Unlock()
 		return
 	}
@@ -71,31 +66,26 @@ func (prt *Protocol) SendData(data []byte) (err error) {
 	prt.wrMu.Lock()
 	_, err = prt.wr.Write([]byte("\r\n"))
 	if err != nil {
-		err = ErrIO
 		prt.wrMu.Unlock()
 		return
 	}
 	_, err = prt.wr.Write([]byte(strconv.Itoa(len(data))))
 	if err != nil {
-		err = ErrIO
 		prt.wrMu.Unlock()
 		return
 	}
 	_, err = prt.wr.Write([]byte("\r\n"))
 	if err != nil {
-		err = ErrIO
 		prt.wrMu.Unlock()
 		return
 	}
 	_, err = prt.wr.Write(data)
 	if err != nil {
-		err = ErrIO
 		prt.wrMu.Unlock()
 		return
 	}
 	_, err = prt.wr.Write([]byte("\r\n"))
 	if err != nil {
-		err = ErrIO
 		prt.wrMu.Unlock()
 		return
 	}
@@ -107,7 +97,6 @@ func (prt *Protocol) Flush() (err error) {
 	prt.wrMu.Lock()
 	err = prt.wr.Flush()
 	if err != nil {
-		err = ErrIO
 		prt.wrMu.Unlock()
 		return
 	}
@@ -140,20 +129,18 @@ func (prt *Protocol) Serve(state State, closeCh <-chan struct{}) {
 		line, err = readBytesLimit(prt.rd, '\n', MaxLineLen)
 		if err != nil {
 			if err == errBufferLimitExceeded {
-				err = ErrProtocol
-			} else {
-				err = ErrIO
+				err = &Error{Err: ErrProtocol}
 			}
 			panic(err)
 		}
 		line = trimCrLf(line)
 		if len(line) == 0 {
-			panic(ErrProtocol)
+			panic(&Error{Err: ErrProtocol})
 		}
 		var cmd Cmd
 		cmd, err = prt.cmdParser.Parse(line)
 		if err != nil {
-			panic(ErrProtocol)
+			panic(&Error{Err: ErrProtocol})
 		}
 		var count int
 		count = state.OnReadCmd(cmd)
@@ -164,9 +151,7 @@ func (prt *Protocol) Serve(state State, closeCh <-chan struct{}) {
 			line, err = readBytesLimit(prt.rd, '\n', MaxLineLen)
 			if err != nil {
 				if err == errBufferLimitExceeded {
-					err = ErrProtocol
-				} else {
-					err = ErrIO
+					err = &Error{Err: ErrProtocol}
 				}
 				panic(err)
 			}
@@ -180,9 +165,7 @@ func (prt *Protocol) Serve(state State, closeCh <-chan struct{}) {
 			line, err = readBytesLimit(prt.rd, '\n', MaxLineLen)
 			if err != nil {
 				if err == errBufferLimitExceeded {
-					err = ErrProtocol
-				} else {
-					err = ErrIO
+					err = &Error{Err: ErrProtocol}
 				}
 				panic(err)
 			}
@@ -190,25 +173,23 @@ func (prt *Protocol) Serve(state State, closeCh <-chan struct{}) {
 			var size int
 			size, err = strconv.Atoi(string(line))
 			if err != nil || size < 0 {
-				panic(ErrProtocol)
+				panic(&Error{Err: ErrProtocol})
 			}
 			data := make([]byte, size)
 			_, err = io.ReadFull(prt.rd, data)
 			if err != nil {
-				panic(ErrIO)
+				panic(err)
 			}
 			line, err = readBytesLimit(prt.rd, '\n', 2)
 			if err != nil {
 				if err == errBufferLimitExceeded {
-					err = ErrProtocol
-				} else {
-					err = ErrIO
+					err = &Error{Err: ErrProtocol}
 				}
 				panic(err)
 			}
 			line = trimCrLf(line)
 			if len(line) != 0 {
-				panic(ErrProtocol)
+				panic(&Error{Err: ErrProtocol})
 			}
 			state.OnReadData(data)
 		}

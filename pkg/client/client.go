@@ -17,16 +17,6 @@ func New(network, address string) (cl *Client, err error) {
 	if err != nil {
 		return
 	}
-	/*if tcpConn, ok := conn.(*net.TCPConn); ok {
-		err = tcpConn.SetReadBuffer(1 * 1024 * 1024)
-		if err != nil {
-			return
-		}
-		err = tcpConn.SetWriteBuffer(1 * 1024 * 1024)
-		if err != nil {
-			return
-		}
-	}*/
 	cl = &Client{
 		conn: conn,
 		cs:   newConnState(conn),

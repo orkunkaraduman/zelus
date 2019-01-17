@@ -39,17 +39,6 @@ func (srv *Server) Shutdown(ctx context.Context) error {
 }
 
 func (srv *Server) serve(conn net.Conn, closeCh <-chan struct{}) {
-	/*if tcpConn, ok := conn.(*net.TCPConn); ok {
-		var err error
-		err = tcpConn.SetReadBuffer(1 * 1024 * 1024)
-		if err != nil {
-			panic(err)
-		}
-		err = tcpConn.SetWriteBuffer(1 * 1024 * 1024)
-		if err != nil {
-			panic(err)
-		}
-	}*/
 	cs := newConnState(conn)
 	cs.st = srv.st
 	cs.Serve(cs, closeCh)
