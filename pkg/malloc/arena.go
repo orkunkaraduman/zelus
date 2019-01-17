@@ -5,7 +5,6 @@ import (
 	"runtime"
 	"sync"
 	"sync/atomic"
-	"time"
 	"unsafe"
 )
 
@@ -50,7 +49,6 @@ func NewArena(buf []byte) *Arena {
 	}
 	a.fl.setFree(0, h)
 	a.stats.TotalSize = int64(totalSize)
-	go a.dispatch(0, totalSize)
 	runtime.Gosched()
 	return a
 }
@@ -72,34 +70,6 @@ func AllocArena(totalSize int) *Arena {
 		buf[i] = 0
 	}
 	return NewArena(buf)
-}
-
-func (a *Arena) dispatch(start, end int) {
-	for {
-		offset, length, high := start, 1<<MinHigh, MinHigh
-		for offset < end {
-			high = a.fl.get(offset)
-			if high < 0 {
-				offset += length
-				continue
-			}
-			allocated := high&freeListAlloc != 0
-			high &= 0x3f
-			length = 1 << uint(high)
-			c := a.fl.queue[high-MinHigh]
-			if !allocated {
-				select {
-				case c <- offset:
-				default:
-				}
-			}
-			offset += length
-			if len(c) >= cap(c) {
-				time.Sleep(5 * time.Millisecond)
-			}
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
 }
 
 func (a *Arena) flLock(offset, length int) {

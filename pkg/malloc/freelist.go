@@ -6,9 +6,10 @@ import (
 )
 
 type freeList struct {
-	size  int
-	list  []uint8
-	queue []chan int
+	size       int
+	list       []uint8
+	queue      []chan int
+	dispatchCh chan struct{}
 }
 
 const (
@@ -19,9 +20,10 @@ const (
 func newFreeList(size int) *freeList {
 	count := (size-1)/MinLength + 1
 	f := &freeList{
-		size:  size,
-		list:  make([]uint8, count, count+4),
-		queue: make([]chan int, MaxHigh-MinHigh+1),
+		size:       size,
+		list:       make([]uint8, count, count+4),
+		queue:      make([]chan int, MaxHigh-MinHigh+1),
+		dispatchCh: make(chan struct{}),
 	}
 	for i := range f.list {
 		f.list[i] = 0xff
@@ -29,6 +31,7 @@ func newFreeList(size int) *freeList {
 	for i := range f.queue {
 		f.queue[i] = make(chan int, 4*1024)
 	}
+	go f.dispatch()
 	return f
 }
 
@@ -52,6 +55,35 @@ func (f *freeList) filledSize() int {
 	return r
 }
 
+func (f *freeList) dispatch() {
+	for {
+		<-f.dispatchCh
+		offset, length, high := 0, 1<<MinHigh, MinHigh
+		for offset < f.size {
+			high = f.get(offset)
+			if high < 0 {
+				offset += length
+				continue
+			}
+			allocated := high&freeListAlloc != 0
+			high &= 0x3f
+			length = 1 << uint(high)
+			c := f.queue[high-MinHigh]
+			if !allocated {
+				select {
+				case c <- offset:
+				default:
+				}
+			}
+			offset += length
+			/*if len(c) >= cap(c) {
+				time.Sleep(5 * time.Millisecond)
+			}*/
+		}
+		//time.Sleep(5 * time.Millisecond)
+	}
+}
+
 func (f *freeList) getFree(offset int) int {
 	i := offset / MinLength
 	if i >= len(f.list) {
@@ -71,6 +103,10 @@ func (f *freeList) setFree(offset int, high int) {
 	select {
 	case f.queue[v-MinHigh] <- offset:
 	default:
+		select {
+		case f.dispatchCh <- struct{}{}:
+		default:
+		}
 	}
 }
 
