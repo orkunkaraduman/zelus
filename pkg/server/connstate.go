@@ -32,7 +32,7 @@ func (cs *connState) OnReadCmd(cmd protocol.Cmd) (count int) {
 	cs.rIndex = 0
 	cs.rCount = 0
 	if cs.rCmd.Name == "QUIT" || cs.rCmd.Name == "ERROR" {
-		cs.Close()
+		count = -1
 		return
 	}
 	if cs.rCmd.Name == "GET" {
@@ -77,7 +77,7 @@ func (cs *connState) OnReadCmd(cmd protocol.Cmd) (count int) {
 		}
 		return
 	}
-	return
+	panic(&protocol.Error{Err: ErrUnknownCommand, Cmd: cs.rCmd})
 }
 
 func (cs *connState) OnReadData(data []byte) {
@@ -111,10 +111,14 @@ func (cs *connState) OnReadData(data []byte) {
 func (cs *connState) OnQuit(e error) {
 	if e != nil {
 		if e, ok := e.(*protocol.Error); ok {
-			cs.SendCmd(protocol.Cmd{Name: "ERROR", Args: []string{e.Err.Error()}})
+			cmd := protocol.Cmd{Name: "ERROR", Args: []string{e.Err.Error()}}
+			if e.Err == ErrUnknownCommand {
+				cmd.Args = append(cmd.Args, e.Cmd.Name)
+			}
+			cs.SendCmd(cmd)
 			cs.Flush()
+			return
 		}
-		return
 	}
 	cs.SendCmd(protocol.Cmd{Name: "QUIT"})
 	cs.Flush()

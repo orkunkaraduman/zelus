@@ -2,6 +2,7 @@ package client
 
 import (
 	"net"
+	"sync/atomic"
 
 	"github.com/orkunkaraduman/zelus/pkg/protocol"
 )
@@ -9,6 +10,7 @@ import (
 type connState struct {
 	*protocol.Protocol
 	parser *protocol.CmdParser
+	done   int32
 
 	rCmd   protocol.Cmd
 	rIndex int
@@ -35,12 +37,13 @@ func (cs *connState) OnReadCmd(cmd protocol.Cmd) (count int) {
 	cs.rIndex = 0
 	cs.rCount = 0
 	if cs.rCmd.Name == "QUIT" || cs.rCmd.Name == "ERROR" {
-		cs.Close()
+		count = -1
 		return
 	}
 	var ok bool
 	cs.sCmd, ok = <-cs.sCmdQueue
 	if !ok {
+		count = -1
 		return
 	}
 	if cs.rCmd.Name == "OK" {
@@ -82,17 +85,26 @@ func (cs *connState) OnQuit(e error) {
 	close(cs.resultQueue)
 	if e != nil {
 		if e, ok := e.(*protocol.Error); ok {
-			cs.SendCmd(protocol.Cmd{Name: "ERROR", Args: []string{e.Err.Error()}})
+			cmd := protocol.Cmd{Name: "ERROR", Args: []string{e.Err.Error()}}
+			if e.Err == ErrUnknownCommand {
+				cmd.Args = append(cmd.Args, e.Cmd.Name)
+			}
+			cs.SendCmd(cmd)
 			cs.Flush()
+			atomic.CompareAndSwapInt32(&cs.done, 0, 1)
+			return
 		}
-		return
 	}
 	cs.SendCmd(protocol.Cmd{Name: "QUIT"})
 	cs.Flush()
+	atomic.CompareAndSwapInt32(&cs.done, 0, 1)
+}
+
+func (cs *connState) Done() bool {
+	return atomic.LoadInt32(&cs.done) != 0
 }
 
 func (cs *connState) Close() {
-	cs.Protocol.Close()
 	var ok bool
 	select {
 	case _, ok = <-cs.sCmdQueue:

@@ -1,14 +1,17 @@
 package client
 
 import (
+	"context"
 	"net"
 	"sync"
+	"time"
 )
 
 type Client struct {
-	mu   sync.Mutex
-	conn net.Conn
-	cs   *connState
+	mu      sync.Mutex
+	conn    net.Conn
+	cs      *connState
+	closeCh chan struct{}
 }
 
 func New(network, address string) (cl *Client, err error) {
@@ -18,18 +21,55 @@ func New(network, address string) (cl *Client, err error) {
 		return
 	}
 	cl = &Client{
-		conn: conn,
-		cs:   newConnState(conn),
+		conn:    conn,
+		cs:      newConnState(conn),
+		closeCh: make(chan struct{}, 1),
 	}
-	go func() {
-		cl.cs.Serve(cl.cs, nil)
-		conn.Close()
-	}()
+	go cl.cs.Serve(cl.cs, cl.closeCh)
 	return
 }
 
-func (cl *Client) Close() {
+func (cl *Client) Shutdown(ctx context.Context) (err error) {
+	select {
+	case cl.closeCh <- struct{}{}:
+	default:
+	}
+	if tcpConn, ok := cl.conn.(*net.TCPConn); ok {
+		tcpConn.CloseRead()
+	}
+	if unixConn, ok := cl.conn.(*net.UnixConn); ok {
+		unixConn.CloseRead()
+	}
 	cl.cs.Close()
+	for {
+		select {
+		case <-time.After(5 * time.Millisecond):
+			if cl.cs.Done() {
+				err = cl.conn.Close()
+				return
+			}
+		case <-ctx.Done():
+			cl.conn.Close()
+			err = ctx.Err()
+			return
+		}
+	}
+}
+
+func (cl *Client) Close() (err error) {
+	select {
+	case cl.closeCh <- struct{}{}:
+	default:
+	}
+	if tcpConn, ok := cl.conn.(*net.TCPConn); ok {
+		tcpConn.CloseRead()
+	}
+	if unixConn, ok := cl.conn.(*net.UnixConn); ok {
+		unixConn.CloseRead()
+	}
+	cl.cs.Close()
+	err = cl.conn.Close()
+	return
 }
 
 func (cl *Client) Get(keys []string) (k []string, v [][]byte, err error) {

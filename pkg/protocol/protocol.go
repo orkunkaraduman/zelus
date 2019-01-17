@@ -16,7 +16,6 @@ type Protocol struct {
 	rd        *bufio.Reader
 	wr        *bufio.Writer
 	wrMu      sync.Mutex
-	closeCh   chan struct{}
 	cmdParser *CmdParser
 }
 
@@ -24,17 +23,9 @@ func New(r io.Reader, w io.Writer) (prt *Protocol) {
 	prt = &Protocol{
 		rd:        bufio.NewReaderSize(r, 128*1024),
 		wr:        bufio.NewWriterSize(w, 128*1024),
-		closeCh:   make(chan struct{}, 1),
 		cmdParser: NewCmdParser(),
 	}
 	return
-}
-
-func (prt *Protocol) Close() {
-	select {
-	case prt.closeCh <- struct{}{}:
-	default:
-	}
 }
 
 func (prt *Protocol) SendCmd(cmd Cmd) (err error) {
@@ -114,8 +105,6 @@ func (prt *Protocol) Serve(state State, closeCh <-chan struct{}) {
 		select {
 		case <-closeCh:
 			closed = true
-		case <-prt.closeCh:
-			closed = true
 		default:
 		}
 		if closed {
@@ -144,6 +133,9 @@ func (prt *Protocol) Serve(state State, closeCh <-chan struct{}) {
 		}
 		var count int
 		count = state.OnReadCmd(cmd)
+		if count < 0 {
+			break
+		}
 
 		// read datas
 		for i := 0; i < count; i++ {
