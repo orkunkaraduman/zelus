@@ -82,6 +82,7 @@ func (cs *connState) OnReadData(data []byte) {
 }
 
 func (cs *connState) OnQuit(e error) {
+	cs.Close()
 	close(cs.resultQueue)
 	if e != nil {
 		if e, ok := e.(*protocol.Error); ok {
@@ -105,15 +106,8 @@ func (cs *connState) Done() bool {
 }
 
 func (cs *connState) Close() {
-	var ok bool
-	select {
-	case _, ok = <-cs.sCmdQueue:
-	default:
-		ok = true
-	}
-	if ok {
-		close(cs.sCmdQueue)
-	}
+	defer func() { recover() }()
+	close(cs.sCmdQueue)
 }
 
 func (cs *connState) Get(keys []string) (k []string, v [][]byte, err error) {
