@@ -14,11 +14,25 @@ type Client struct {
 	closeCh chan struct{}
 }
 
+var (
+	ConnBuffer = 0
+)
+
 func New(network, address string) (cl *Client, err error) {
 	var conn net.Conn
 	conn, err = net.Dial(network, address)
 	if err != nil {
 		return
+	}
+	if ConnBuffer > 0 {
+		if tcpConn, ok := conn.(*net.TCPConn); ok {
+			tcpConn.SetReadBuffer(ConnBuffer)
+			tcpConn.SetWriteBuffer(ConnBuffer)
+		}
+		if unixConn, ok := conn.(*net.UnixConn); ok {
+			unixConn.SetReadBuffer(ConnBuffer)
+			unixConn.SetWriteBuffer(ConnBuffer)
+		}
 	}
 	cl = &Client{
 		conn:    conn,
