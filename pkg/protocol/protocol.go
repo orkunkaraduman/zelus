@@ -106,12 +106,106 @@ func (prt *Protocol) Flush() (err error) {
 	return
 }
 
-func (prt *Protocol) Serve(state State, closeCh <-chan struct{}) {
+func (prt *Protocol) Receive(rc Receiver, bf *buffer.Buffer) bool {
+	var line []byte
+	var err error
+
+	// read line
+	line, err = readBytesLimit(prt.rd, '\n', MaxLineLen)
+	if err != nil {
+		if err == errBufferLimitExceeded {
+			err = &Error{Err: ErrProtocol}
+		}
+		panic(err)
+	}
+	line = trimCrLf(line)
+	if len(line) == 0 {
+		panic(&Error{Err: ErrProtocol})
+	}
+	var cmd Cmd
+	cmd, err = prt.cmdParser.Parse(line)
+	if err != nil {
+		panic(&Error{Err: ErrProtocol})
+	}
+	var count int
+	count = rc.OnReadCmd(cmd)
+	if count < 0 {
+		err = prt.Flush()
+		if err != nil {
+			panic(err)
+		}
+		return false
+	}
+
+	// read datas
+	for i := 0; i < count; i++ {
+		// read data header
+		line, err = readBytesLimit(prt.rd, '\n', MaxLineLen)
+		if err != nil {
+			if err == errBufferLimitExceeded {
+				err = &Error{Err: ErrProtocol}
+			}
+			panic(err)
+		}
+		line = trimCrLf(line)
+		if len(line) != 0 {
+			rc.OnReadData(count, i, line)
+			continue
+		}
+
+		// read data length
+		line, err = readBytesLimit(prt.rd, '\n', MaxLineLen)
+		if err != nil {
+			if err == errBufferLimitExceeded {
+				err = &Error{Err: ErrProtocol}
+			}
+			panic(err)
+		}
+		line = trimCrLf(line)
+		var size int
+		size, err = strconv.Atoi(string(line))
+		if err != nil {
+			panic(&Error{Err: ErrProtocol})
+		}
+
+		// read null data
+		if size < 0 {
+			rc.OnReadData(count, i, nil)
+			continue
+		}
+
+		// read data
+		data := bf.Want(size)
+		_, err = io.ReadFull(prt.rd, data)
+		if err != nil {
+			panic(err)
+		}
+		line, err = readBytesLimit(prt.rd, '\n', 2)
+		if err != nil {
+			if err == errBufferLimitExceeded {
+				err = &Error{Err: ErrProtocol}
+			}
+			panic(err)
+		}
+		line = trimCrLf(line)
+		if len(line) != 0 {
+			panic(&Error{Err: ErrProtocol})
+		}
+		rc.OnReadData(count, i, data)
+	}
+	err = prt.Flush()
+	if err != nil {
+		panic(err)
+	}
+	return true
+}
+
+func (prt *Protocol) Serve(rc Receiver, closeCh <-chan struct{}) {
 	bf := buffer.New()
 	defer func() {
 		bf.Close()
 		e, _ := recover().(error)
-		state.OnQuit(e)
+		rc.OnQuit(e)
 	}()
 	for {
 		closed := false
@@ -123,92 +217,8 @@ func (prt *Protocol) Serve(state State, closeCh <-chan struct{}) {
 		if closed {
 			break
 		}
-
-		var line []byte
-		var err error
-
-		// read line
-		line, err = readBytesLimit(prt.rd, '\n', MaxLineLen)
-		if err != nil {
-			if err == errBufferLimitExceeded {
-				err = &Error{Err: ErrProtocol}
-			}
-			panic(err)
-		}
-		line = trimCrLf(line)
-		if len(line) == 0 {
-			panic(&Error{Err: ErrProtocol})
-		}
-		var cmd Cmd
-		cmd, err = prt.cmdParser.Parse(line)
-		if err != nil {
-			panic(&Error{Err: ErrProtocol})
-		}
-		var count int
-		count = state.OnReadCmd(cmd)
-		if count < 0 {
+		if !prt.Receive(rc, bf) {
 			break
-		}
-
-		// read datas
-		for i := 0; i < count; i++ {
-			// read data header
-			line, err = readBytesLimit(prt.rd, '\n', MaxLineLen)
-			if err != nil {
-				if err == errBufferLimitExceeded {
-					err = &Error{Err: ErrProtocol}
-				}
-				panic(err)
-			}
-			line = trimCrLf(line)
-			if len(line) != 0 {
-				state.OnReadData(count, i, line)
-				continue
-			}
-
-			// read data length
-			line, err = readBytesLimit(prt.rd, '\n', MaxLineLen)
-			if err != nil {
-				if err == errBufferLimitExceeded {
-					err = &Error{Err: ErrProtocol}
-				}
-				panic(err)
-			}
-			line = trimCrLf(line)
-			var size int
-			size, err = strconv.Atoi(string(line))
-			if err != nil {
-				panic(&Error{Err: ErrProtocol})
-			}
-
-			// read null data
-			if size < 0 {
-				state.OnReadData(count, i, nil)
-				continue
-			}
-
-			// read data
-			data := bf.Want(size)
-			_, err = io.ReadFull(prt.rd, data)
-			if err != nil {
-				panic(err)
-			}
-			line, err = readBytesLimit(prt.rd, '\n', 2)
-			if err != nil {
-				if err == errBufferLimitExceeded {
-					err = &Error{Err: ErrProtocol}
-				}
-				panic(err)
-			}
-			line = trimCrLf(line)
-			if len(line) != 0 {
-				panic(&Error{Err: ErrProtocol})
-			}
-			state.OnReadData(count, i, data)
-		}
-		err = prt.Flush()
-		if err != nil {
-			panic(err)
 		}
 	}
 }
