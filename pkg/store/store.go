@@ -45,6 +45,9 @@ func (st *Store) Get(key string, buf []byte) (val []byte) {
 	}
 	m := 0
 	for _, data := range nd.Datas {
+		if data == nil {
+			break
+		}
 		n, r := 0, len(data)
 		if p != 0 {
 			if r > p {
@@ -98,7 +101,7 @@ func (st *Store) Set(key string, val []byte, replace bool) bool {
 		}
 		n := 0
 		if j < len(bKey) {
-			n = copy(data, bKey)
+			n = copy(data, bKey[j:])
 			j += n
 		}
 		if n < len(data) {
