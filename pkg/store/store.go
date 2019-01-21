@@ -10,6 +10,8 @@ type Store struct {
 	dataPool *malloc.Pool
 }
 
+type GetFunc func(size int, index int, data []byte)
+
 func New(count int, size int) (st *Store) {
 	if count <= 0 {
 		return
@@ -23,7 +25,7 @@ func New(count int, size int) (st *Store) {
 	return
 }
 
-func (st *Store) Get(key string, buf []byte) (val []byte) {
+func (st *Store) Get(key string, f GetFunc) bool {
 	bKey := getBKey(key)
 	keyHash := HashFunc(bKey)
 	slotIdx := keyHash % len(st.slots)
@@ -32,17 +34,13 @@ func (st *Store) Get(key string, buf []byte) (val []byte) {
 	ndIdx := sl.FindNode(keyHash, bKey)
 	if ndIdx < 0 {
 		sl.Mu.Unlock()
-		return
+		return false
 	}
 	nd := &sl.Nodes[ndIdx]
 	l := nd.Size
 	p := len(bKey)
 	l -= p
-	if len(buf) >= l {
-		val = buf[:l]
-	} else {
-		val = make([]byte, l)
-	}
+	size := l
 	m := 0
 	for _, data := range nd.Datas {
 		if data == nil {
@@ -57,11 +55,17 @@ func (st *Store) Get(key string, buf []byte) (val []byte) {
 			p -= r
 		}
 		if p == 0 {
-			copy(val[m:], data[n:])
+			//m += copy(val[m:], data[n:])
+			d := data[n:]
+			f(size, m, d)
+			l -= len(d)
+		}
+		if l <= 0 {
+			break
 		}
 	}
 	sl.Mu.Unlock()
-	return
+	return true
 }
 
 func (st *Store) Set(key string, val []byte, replace bool) bool {
@@ -87,7 +91,8 @@ func (st *Store) Set(key string, val []byte, replace bool) bool {
 	}
 	nd := &sl.Nodes[ndIdx]
 	nd.KeyHash = keyHash
-	if !nd.Set(st.slotPool, st.dataPool, len(bKey)+len(val)) {
+	lbKey := len(bKey)
+	if !nd.Set(st.slotPool, st.dataPool, lbKey+len(val)) {
 		if foundNdIdx < 0 {
 			sl.DelNode(st.slotPool, st.dataPool, ndIdx)
 		}
@@ -100,7 +105,7 @@ func (st *Store) Set(key string, val []byte, replace bool) bool {
 			break
 		}
 		n := 0
-		if j < len(bKey) {
+		if j < lbKey {
 			n = copy(data, bKey[j:])
 			j += n
 		}
