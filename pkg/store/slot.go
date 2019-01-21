@@ -97,7 +97,8 @@ type node struct {
 
 func (nd *node) Alloc(slotPool, dataPool *malloc.Pool, size int) bool {
 	sz := size - (malloc.MinLength - (nd.Size-1)%malloc.MinLength - 1)
-	datas := make([][]byte, 0, 256)
+	var d [256][]byte
+	datas := d[:0]
 	for sz > 0 {
 		var ptr []byte
 		for l := 1 << uint(malloc.HighBit(sz)-1); l >= malloc.MinLength && ptr == nil; l >>= 1 {
