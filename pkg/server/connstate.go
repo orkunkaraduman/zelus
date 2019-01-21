@@ -9,9 +9,9 @@ import (
 )
 
 type connState struct {
+	conn net.Conn
 	*protocol.Protocol
-	parser *protocol.CmdParser
-	bf     *buffer.Buffer
+	bf *buffer.Buffer
 
 	st *store.Store
 
@@ -20,8 +20,8 @@ type connState struct {
 
 func newConnState(conn net.Conn) (cs *connState) {
 	cs = &connState{
+		conn:     conn,
 		Protocol: protocol.New(conn, conn),
-		parser:   protocol.NewCmdParser(),
 		bf:       buffer.New(),
 	}
 	return
@@ -88,7 +88,7 @@ func (cs *connState) OnReadData(count int, index int, data []byte) {
 			}
 		}
 		if index+1 >= count {
-			var keys []string
+			keys := make([]string, 0, len(cs.rCmd.Args))
 			for _, key := range cs.rCmd.Args {
 				if key == "" {
 					continue
@@ -105,7 +105,10 @@ func (cs *connState) OnReadData(count int, index int, data []byte) {
 }
 
 func (cs *connState) OnQuit(e error) {
-	cs.Close()
+	defer func() {
+		cs.bf.Close()
+		cs.Flush()
+	}()
 	if e != nil {
 		if e, ok := e.(*protocol.Error); ok {
 			cmd := protocol.Cmd{Name: "ERROR", Args: []string{e.Err.Error()}}
@@ -113,14 +116,8 @@ func (cs *connState) OnQuit(e error) {
 				cmd.Args = append(cmd.Args, e.Cmd.Name)
 			}
 			cs.SendCmd(cmd)
-			cs.Flush()
 			return
 		}
 	}
 	cs.SendCmd(protocol.Cmd{Name: "QUIT"})
-	cs.Flush()
-}
-
-func (cs *connState) Close() {
-	cs.bf.Close()
 }
