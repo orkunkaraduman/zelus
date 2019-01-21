@@ -20,6 +20,7 @@ func NewCmdParser() (cp *CmdParser) {
 	cp.csvReader = csv.NewReader(cp.csvReaderBuffer)
 	cp.csvReader.Comma = ' '
 	cp.csvReader.FieldsPerRecord = -1
+	cp.csvReader.ReuseRecord = true
 	cp.csvWriterBuffer = bytes.NewBuffer(nil)
 	cp.csvWriterBuffer.Grow(MaxLineLen)
 	cp.csvWriter = csv.NewWriter(cp.csvWriterBuffer)

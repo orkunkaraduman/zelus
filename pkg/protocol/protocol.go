@@ -6,10 +6,7 @@ import (
 	"io"
 	"strconv"
 	"sync"
-)
-
-const (
-	MaxLineLen = 4096
+	"time"
 )
 
 type Protocol struct {
@@ -19,10 +16,14 @@ type Protocol struct {
 	cmdParser *CmdParser
 }
 
+var (
+	MaxLineLen = 64 * 1024
+)
+
 func New(r io.Reader, w io.Writer) (prt *Protocol) {
 	prt = &Protocol{
-		rd:        bufio.NewReaderSize(r, 128*1024),
-		wr:        bufio.NewWriterSize(w, 128*1024),
+		rd:        bufio.NewReaderSize(r, MaxLineLen*2),
+		wr:        bufio.NewWriterSize(w, MaxLineLen*2),
 		cmdParser: NewCmdParser(),
 	}
 	return
@@ -96,7 +97,13 @@ func (prt *Protocol) Flush() (err error) {
 }
 
 func (prt *Protocol) Serve(state State, closeCh <-chan struct{}) {
+	var data []byte
+	var dataMaxSize int
+	var dataFreeCancelCh = make(chan struct{}, 1)
+	var dataMu sync.Mutex
 	defer func() {
+		data = nil
+		close(dataFreeCancelCh)
 		e, _ := recover().(error)
 		state.OnQuit(e)
 	}()
@@ -153,7 +160,7 @@ func (prt *Protocol) Serve(state State, closeCh <-chan struct{}) {
 				continue
 			}
 
-			// read data
+			// read data length
 			line, err = readBytesLimit(prt.rd, '\n', MaxLineLen)
 			if err != nil {
 				if err == errBufferLimitExceeded {
@@ -167,23 +174,64 @@ func (prt *Protocol) Serve(state State, closeCh <-chan struct{}) {
 			if err != nil || size < 0 {
 				panic(&Error{Err: ErrProtocol})
 			}
-			data := make([]byte, size)
-			_, err = io.ReadFull(prt.rd, data)
-			if err != nil {
-				panic(err)
-			}
-			line, err = readBytesLimit(prt.rd, '\n', 2)
-			if err != nil {
-				if err == errBufferLimitExceeded {
-					err = &Error{Err: ErrProtocol}
+
+			// read data
+			func() {
+				dataMu.Lock()
+				defer dataMu.Unlock()
+				if cap(data) >= size {
+					data = data[:size]
+				} else {
+					data = make([]byte, size, size*2)
+					//dataFreeCancelCh <- struct{}{}
+					close(dataFreeCancelCh)
+					dataFreeCancelCh = make(chan struct{}, 1)
+					go func(c chan struct{}) {
+						tk := time.NewTicker(60 * time.Second)
+						for {
+							done := false
+							select {
+							case <-tk.C:
+								dataMu.Lock()
+								if cap(data)/4 >= dataMaxSize {
+									if dataMaxSize > 0 {
+										data = make([]byte, 0, dataMaxSize*2)
+									} else {
+										data = nil
+									}
+								}
+								dataMaxSize = 0
+								dataMu.Unlock()
+							case <-c:
+								done = true
+							}
+							if done {
+								break
+							}
+						}
+						tk.Stop()
+					}(dataFreeCancelCh)
 				}
-				panic(err)
-			}
-			line = trimCrLf(line)
-			if len(line) != 0 {
-				panic(&Error{Err: ErrProtocol})
-			}
-			state.OnReadData(data)
+				if size > dataMaxSize {
+					dataMaxSize = size
+				}
+				_, err = io.ReadFull(prt.rd, data)
+				if err != nil {
+					panic(err)
+				}
+				line, err = readBytesLimit(prt.rd, '\n', 2)
+				if err != nil {
+					if err == errBufferLimitExceeded {
+						err = &Error{Err: ErrProtocol}
+					}
+					panic(err)
+				}
+				line = trimCrLf(line)
+				if len(line) != 0 {
+					panic(&Error{Err: ErrProtocol})
+				}
+				state.OnReadData(data)
+			}()
 		}
 		err = prt.Flush()
 		if err != nil {
