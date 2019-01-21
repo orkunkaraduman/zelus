@@ -96,7 +96,10 @@ type node struct {
 }
 
 func (nd *node) Alloc(slotPool, dataPool *malloc.Pool, size int) bool {
-	sz := size - (malloc.MinLength - (nd.Size-1)%malloc.MinLength - 1)
+	sz := size
+	if nd.Size > 0 {
+		sz -= malloc.MinLength - (nd.Size-1)%malloc.MinLength - 1
+	}
 	var d [256][]byte
 	datas := d[:0]
 	for sz > 0 {
