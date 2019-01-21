@@ -62,6 +62,15 @@ func (prt *Protocol) SendData(data []byte) (err error) {
 		prt.wrMu.Unlock()
 		return
 	}
+	if data == nil {
+		_, err = prt.wr.Write([]byte("-1\r\n"))
+		if err != nil {
+			prt.wrMu.Unlock()
+			return
+		}
+		prt.wrMu.Unlock()
+		return
+	}
 	_, err = prt.wr.Write([]byte(strconv.Itoa(len(data))))
 	if err != nil {
 		prt.wrMu.Unlock()
@@ -153,7 +162,7 @@ func (prt *Protocol) Serve(state State, closeCh <-chan struct{}) {
 			}
 			line = trimCrLf(line)
 			if len(line) != 0 {
-				state.OnReadData(line)
+				state.OnReadData(count, i, line)
 				continue
 			}
 
@@ -168,12 +177,18 @@ func (prt *Protocol) Serve(state State, closeCh <-chan struct{}) {
 			line = trimCrLf(line)
 			var size int
 			size, err = strconv.Atoi(string(line))
-			if err != nil || size < 0 {
+			if err != nil {
 				panic(&Error{Err: ErrProtocol})
 			}
 
+			// read null data
+			if size < 0 {
+				state.OnReadData(count, i, nil)
+				continue
+			}
+
 			// read data
-			data := bf.Need(size)
+			data := bf.Want(size)
 			_, err = io.ReadFull(prt.rd, data)
 			if err != nil {
 				panic(err)
@@ -189,7 +204,7 @@ func (prt *Protocol) Serve(state State, closeCh <-chan struct{}) {
 			if len(line) != 0 {
 				panic(&Error{Err: ErrProtocol})
 			}
-			state.OnReadData(data)
+			state.OnReadData(count, i, data)
 		}
 		err = prt.Flush()
 		if err != nil {

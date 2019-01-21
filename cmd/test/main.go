@@ -18,13 +18,13 @@ import (
 
 var wg sync.WaitGroup
 
-func run(st *store.Store, start, stop int) {
+func set(st *store.Store, start, stop int) {
 	wg.Add(1)
 	keys := make([]string, stop-start)
 	for i := start; i < stop; i++ {
 		keys[i-start] = fmt.Sprintf("%d", i)
 	}
-	fmt.Println(time.Now(), "start")
+	fmt.Println(time.Now(), "set", "start")
 	var buf [10 * 4096]byte
 	i, r := 0, false
 	for i = start; i < stop; i++ {
@@ -68,11 +68,12 @@ func get(st *store.Store, start, stop int) {
 		keys[i-start] = fmt.Sprintf("%d", i)
 	}
 	fmt.Println(time.Now(), "get start")
-	var buf [10 * 4096]byte
 	i, r := 0, true
 	for i = start; i < stop; i++ {
-		p := st.Get(keys[i-start], buf[:])
-		if p == nil {
+		p := st.Get(keys[i-start], func(size int, index int, data []byte) {
+
+		})
+		if !p {
 			r = false
 			break
 		}
@@ -110,7 +111,7 @@ func main() {
 
 	for {
 		for i := 0; i < 4; i++ {
-			go run(st, i*2*1024*1024*1024/4096, (i+1)*2*1024*1024*1024/4096)
+			go set(st, i*2*1024*1024*1024/4096, (i+1)*2*1024*1024*1024/4096)
 		}
 		time.Sleep(1 * time.Second)
 		wg.Wait()
@@ -122,6 +123,7 @@ func main() {
 		time.Sleep(1 * time.Second)
 		wg.Wait()
 		runtime.Gosched()
+		continue
 
 		for i := 0; i < 4; i++ {
 			go del(st, i*2*1024*1024*1024/4096, (i+1)*2*1024*1024*1024/4096)

@@ -2,6 +2,6 @@ package protocol
 
 type State interface {
 	OnReadCmd(cmd Cmd) (count int)
-	OnReadData(data []byte)
+	OnReadData(count int, index int, data []byte)
 	OnQuit(e error)
 }

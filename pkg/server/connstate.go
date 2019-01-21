@@ -3,6 +3,7 @@ package server
 import (
 	"net"
 
+	"github.com/orkunkaraduman/zelus/pkg/buffer"
 	"github.com/orkunkaraduman/zelus/pkg/protocol"
 	"github.com/orkunkaraduman/zelus/pkg/store"
 )
@@ -10,18 +11,18 @@ import (
 type connState struct {
 	*protocol.Protocol
 	parser *protocol.CmdParser
+	bf     *buffer.Buffer
 
 	st *store.Store
 
-	rCmd   protocol.Cmd
-	rIndex int
-	rCount int
+	rCmd protocol.Cmd
 }
 
 func newConnState(conn net.Conn) (cs *connState) {
 	cs = &connState{
 		Protocol: protocol.New(conn, conn),
 		parser:   protocol.NewCmdParser(),
+		bf:       buffer.New(),
 	}
 	return
 }
@@ -29,36 +30,34 @@ func newConnState(conn net.Conn) (cs *connState) {
 func (cs *connState) OnReadCmd(cmd protocol.Cmd) (count int) {
 	var err error
 	cs.rCmd = cmd
-	cs.rIndex = 0
-	cs.rCount = 0
 	if cs.rCmd.Name == "QUIT" || cs.rCmd.Name == "ERROR" {
 		count = -1
 		return
 	}
 	if cs.rCmd.Name == "GET" {
 		keys := make([]string, 0, len(cs.rCmd.Args))
-		vals := make([][]byte, 0, len(cs.rCmd.Args))
-		var buf [32 * 1024]byte
 		for _, key := range cs.rCmd.Args {
 			if key == "" {
 				continue
 			}
-			b := []byte(nil)
-			if len(keys) == 0 {
-				b = buf[:]
-			}
-			val := cs.st.Get(key, b)
-			if val != nil {
-				keys = append(keys, key)
-				vals = append(vals, val)
-			}
+			keys = append(keys, key)
 		}
 		err = cs.SendCmd(protocol.Cmd{Name: "OK", Args: keys})
 		if err != nil {
 			panic(err)
 		}
-		for _, val := range vals {
-			err = cs.SendData(val)
+		for _, key := range keys {
+			var buf []byte
+			if cs.st.Get(key, func(size int, index int, data []byte) {
+				if index == 0 {
+					buf = cs.bf.Want(size)
+				}
+				copy(buf[index:], data)
+			}) {
+				err = cs.SendData(buf)
+			} else {
+				err = cs.SendData(nil)
+			}
 			if err != nil {
 				panic(err)
 			}
@@ -68,7 +67,6 @@ func (cs *connState) OnReadCmd(cmd protocol.Cmd) (count int) {
 	if cs.rCmd.Name == "SET" {
 		count = len(cs.rCmd.Args)
 		if count > 0 {
-			cs.rCount = count
 			return
 		}
 		err = cs.SendCmd(protocol.Cmd{Name: "OK"})
@@ -80,10 +78,8 @@ func (cs *connState) OnReadCmd(cmd protocol.Cmd) (count int) {
 	panic(&protocol.Error{Err: ErrUnknownCommand, Cmd: cs.rCmd})
 }
 
-func (cs *connState) OnReadData(data []byte) {
+func (cs *connState) OnReadData(count int, index int, data []byte) {
 	var err error
-	index := cs.rIndex
-	cs.rIndex++
 	if cs.rCmd.Name == "SET" {
 		key := cs.rCmd.Args[index]
 		if key != "" {
@@ -91,7 +87,7 @@ func (cs *connState) OnReadData(data []byte) {
 				cs.rCmd.Args[index] = ""
 			}
 		}
-		if cs.rIndex >= cs.rCount {
+		if index+1 >= count {
 			var keys []string
 			for _, key := range cs.rCmd.Args {
 				if key == "" {
@@ -109,6 +105,7 @@ func (cs *connState) OnReadData(data []byte) {
 }
 
 func (cs *connState) OnQuit(e error) {
+	cs.Close()
 	if e != nil {
 		if e, ok := e.(*protocol.Error); ok {
 			cmd := protocol.Cmd{Name: "ERROR", Args: []string{e.Err.Error()}}
@@ -122,4 +119,8 @@ func (cs *connState) OnQuit(e error) {
 	}
 	cs.SendCmd(protocol.Cmd{Name: "QUIT"})
 	cs.Flush()
+}
+
+func (cs *connState) Close() {
+	cs.bf.Close()
 }

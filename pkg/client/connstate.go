@@ -12,9 +12,7 @@ type connState struct {
 	parser *protocol.CmdParser
 	done   int32
 
-	rCmd   protocol.Cmd
-	rIndex int
-	rCount int
+	rCmd protocol.Cmd
 
 	sCmdQueue chan protocol.Cmd
 	sCmd      protocol.Cmd
@@ -34,8 +32,6 @@ func newConnState(conn net.Conn) (cs *connState) {
 
 func (cs *connState) OnReadCmd(cmd protocol.Cmd) (count int) {
 	cs.rCmd = cmd
-	cs.rIndex = 0
-	cs.rCount = 0
 	if cs.rCmd.Name == "QUIT" || cs.rCmd.Name == "ERROR" {
 		count = -1
 		return
@@ -50,7 +46,6 @@ func (cs *connState) OnReadCmd(cmd protocol.Cmd) (count int) {
 		if cs.sCmd.Name == "GET" {
 			count = len(cs.rCmd.Args)
 			if count > 0 {
-				cs.rCount = count
 				return
 			}
 			cs.resultQueue <- nil
@@ -67,13 +62,11 @@ func (cs *connState) OnReadCmd(cmd protocol.Cmd) (count int) {
 	panic(&protocol.Error{Err: ErrUnknownCommand, Cmd: cs.rCmd})
 }
 
-func (cs *connState) OnReadData(data []byte) {
-	index := cs.rIndex
-	cs.rIndex++
+func (cs *connState) OnReadData(count int, index int, data []byte) {
 	if cs.rCmd.Name == "OK" {
 		if cs.sCmd.Name == "GET" {
 			cs.resultQueue <- &keyVal{Key: cs.rCmd.Args[index], Val: data}
-			if cs.rIndex >= cs.rCount {
+			if index+1 >= count {
 				cs.resultQueue <- nil
 			}
 			return

@@ -14,12 +14,12 @@ type Buffer struct {
 }
 
 var (
-	minSize = os.Getpagesize()
+	MinSize = os.Getpagesize()
 )
 
 func New() (b *Buffer) {
 	b = &Buffer{
-		data:     make([]byte, minSize),
+		data:     make([]byte, MinSize),
 		cancelCh: make(chan struct{}, 1),
 	}
 	return
@@ -32,7 +32,7 @@ func (b *Buffer) Close() {
 	b.mu.Unlock()
 }
 
-func (b *Buffer) Need(size int) (buf []byte) {
+func (b *Buffer) Want(size int) (buf []byte) {
 	b.mu.Lock()
 	if len(b.data) < size {
 		b.data = make([]byte, size*2)
@@ -57,8 +57,8 @@ func (b *Buffer) disposer(c chan struct{}) {
 			b.mu.Lock()
 			if len(b.data)/4 >= b.maxSize {
 				l := b.maxSize * 2
-				if l < minSize {
-					l = minSize
+				if l < MinSize {
+					l = MinSize
 				}
 				if len(b.data) > l {
 					b.data = make([]byte, l)
