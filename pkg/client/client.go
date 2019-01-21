@@ -3,16 +3,15 @@ package client
 import (
 	"context"
 	"net"
-	"sync"
 	"time"
 )
 
 type Client struct {
-	mu      sync.Mutex
-	conn    net.Conn
-	cs      *connState
-	closeCh chan struct{}
+	conn net.Conn
+	cs   *connState
 }
+
+type GetFunc func(key string, val []byte)
 
 var (
 	ConnBuffer = 0
@@ -35,26 +34,14 @@ func New(network, address string) (cl *Client, err error) {
 		}
 	}
 	cl = &Client{
-		conn:    conn,
-		cs:      newConnState(conn),
-		closeCh: make(chan struct{}, 1),
+		conn: conn,
+		cs:   newConnState(conn),
 	}
-	go cl.cs.Serve(cl.cs, cl.closeCh)
 	return
 }
 
 func (cl *Client) Shutdown(ctx context.Context) (err error) {
-	select {
-	case cl.closeCh <- struct{}{}:
-	default:
-	}
-	if tcpConn, ok := cl.conn.(*net.TCPConn); ok {
-		tcpConn.CloseRead()
-	}
-	if unixConn, ok := cl.conn.(*net.UnixConn); ok {
-		unixConn.CloseRead()
-	}
-	cl.cs.Close()
+	go cl.cs.Close(nil)
 	for {
 		select {
 		case <-time.After(5 * time.Millisecond):
@@ -71,31 +58,15 @@ func (cl *Client) Shutdown(ctx context.Context) (err error) {
 }
 
 func (cl *Client) Close() (err error) {
-	select {
-	case cl.closeCh <- struct{}{}:
-	default:
-	}
-	if tcpConn, ok := cl.conn.(*net.TCPConn); ok {
-		tcpConn.CloseRead()
-	}
-	if unixConn, ok := cl.conn.(*net.UnixConn); ok {
-		unixConn.CloseRead()
-	}
-	cl.cs.Close()
 	err = cl.conn.Close()
+	cl.cs.Close(nil)
 	return
 }
 
-func (cl *Client) Get(keys []string) (k []string, v [][]byte, err error) {
-	cl.mu.Lock()
-	k, v, err = cl.cs.Get(keys)
-	cl.mu.Unlock()
-	return
+func (cl *Client) Get(keys []string, f GetFunc) (err error) {
+	return cl.cs.Get(keys, f)
 }
 
 func (cl *Client) Set(keys []string, vals [][]byte) (k []string, err error) {
-	cl.mu.Lock()
-	k, err = cl.cs.Set(keys, vals)
-	cl.mu.Unlock()
-	return
+	return cl.cs.Set(keys, vals)
 }

@@ -1,32 +1,34 @@
 package client
 
 import (
+	"io"
 	"net"
+	"sync"
 	"sync/atomic"
 
+	"github.com/orkunkaraduman/zelus/pkg/buffer"
 	"github.com/orkunkaraduman/zelus/pkg/protocol"
 )
 
 type connState struct {
+	conn net.Conn
 	*protocol.Protocol
-	parser *protocol.CmdParser
-	done   int32
+	bf *buffer.Buffer
+
+	mu   sync.Mutex
+	done int32
 
 	rCmd protocol.Cmd
-
-	sCmdQueue chan protocol.Cmd
-	sCmd      protocol.Cmd
-
-	resultQueue chan *keyVal
+	sCmd protocol.Cmd
+	gf   GetFunc
 }
 
 func newConnState(conn net.Conn) (cs *connState) {
 	cs = &connState{
+		conn:     conn,
 		Protocol: protocol.New(conn, conn),
-		parser:   protocol.NewCmdParser(),
+		bf:       buffer.New(),
 	}
-	cs.sCmdQueue = make(chan protocol.Cmd)
-	cs.resultQueue = make(chan *keyVal)
 	return
 }
 
@@ -36,26 +38,12 @@ func (cs *connState) OnReadCmd(cmd protocol.Cmd) (count int) {
 		count = -1
 		return
 	}
-	var ok bool
-	cs.sCmd, ok = <-cs.sCmdQueue
-	if !ok {
-		count = -1
-		return
-	}
 	if cs.rCmd.Name == "OK" {
 		if cs.sCmd.Name == "GET" {
 			count = len(cs.rCmd.Args)
-			if count > 0 {
-				return
-			}
-			cs.resultQueue <- nil
 			return
 		}
 		if cs.sCmd.Name == "SET" {
-			for _, arg := range cs.rCmd.Args {
-				cs.resultQueue <- &keyVal{Key: arg}
-			}
-			cs.resultQueue <- nil
 			return
 		}
 	}
@@ -65,18 +53,34 @@ func (cs *connState) OnReadCmd(cmd protocol.Cmd) (count int) {
 func (cs *connState) OnReadData(count int, index int, data []byte) {
 	if cs.rCmd.Name == "OK" {
 		if cs.sCmd.Name == "GET" {
-			cs.resultQueue <- &keyVal{Key: cs.rCmd.Args[index], Val: data}
-			if index+1 >= count {
-				cs.resultQueue <- nil
-			}
+			cs.gf(cs.rCmd.Args[index], data)
 			return
 		}
 	}
 }
 
 func (cs *connState) OnQuit(e error) {
-	cs.Close()
-	close(cs.resultQueue)
+	if e != nil {
+		go cs.Close(e)
+	}
+}
+
+func (cs *connState) Done() bool {
+	return atomic.LoadInt32(&cs.done) != 0
+}
+
+func (cs *connState) Close(e error) {
+	if cs.Done() {
+		return
+	}
+	cs.mu.Lock()
+	defer func() {
+		cs.bf.Close()
+		cs.Flush()
+		cs.conn.Close()
+		atomic.CompareAndSwapInt32(&cs.done, 0, 1)
+		cs.mu.Unlock()
+	}()
 	if e != nil {
 		if e, ok := e.(*protocol.Error); ok {
 			cmd := protocol.Cmd{Name: "ERROR", Args: []string{e.Err.Error()}}
@@ -84,84 +88,68 @@ func (cs *connState) OnQuit(e error) {
 				cmd.Args = append(cmd.Args, e.Cmd.Name)
 			}
 			cs.SendCmd(cmd)
-			cs.Flush()
-			atomic.CompareAndSwapInt32(&cs.done, 0, 1)
 			return
 		}
 	}
 	cs.SendCmd(protocol.Cmd{Name: "QUIT"})
-	cs.Flush()
-	atomic.CompareAndSwapInt32(&cs.done, 0, 1)
 }
 
-func (cs *connState) Done() bool {
-	return atomic.LoadInt32(&cs.done) != 0
-}
-
-func (cs *connState) Close() {
-	defer func() { recover() }()
-	close(cs.sCmdQueue)
-}
-
-func (cs *connState) Get(keys []string) (k []string, v [][]byte, err error) {
+func (cs *connState) Get(keys []string, f GetFunc) (err error) {
+	cs.mu.Lock()
+	defer func() {
+		err, _ = recover().(error)
+		cs.OnQuit(err)
+		cs.mu.Unlock()
+	}()
+	if cs.Done() {
+		panic(io.EOF)
+	}
 	cmd := protocol.Cmd{Name: "GET", Args: keys}
 	err = cs.SendCmd(cmd)
 	if err != nil {
-		return
+		panic(err)
 	}
 	err = cs.Flush()
 	if err != nil {
-		return
+		panic(err)
 	}
-	func() {
-		defer func() { recover() }()
-		cs.sCmdQueue <- cmd
-		k = make([]string, 0, len(keys))
-		v = make([][]byte, 0, len(keys))
-	}()
-	if v == nil {
-		return
-	}
-	for kv := range cs.resultQueue {
-		if kv == nil {
-			break
-		}
-		k = append(k, kv.Key)
-		v = append(v, kv.Val)
-	}
+	cs.sCmd = cmd
+	cs.gf = f
+	cs.Receive(cs, cs.bf)
 	return
 }
 
 func (cs *connState) Set(keys []string, vals [][]byte) (k []string, err error) {
+	cs.mu.Lock()
+	defer func() {
+		err, _ = recover().(error)
+		cs.OnQuit(err)
+		cs.mu.Unlock()
+	}()
+	if cs.Done() {
+		panic(io.EOF)
+	}
 	cmd := protocol.Cmd{Name: "SET", Args: keys}
 	err = cs.SendCmd(cmd)
 	if err != nil {
-		return
+		panic(err)
 	}
-	for i, _ := range keys {
+	for i := range keys {
 		val := vals[i]
 		err = cs.SendData(val)
 		if err != nil {
-			return
+			panic(err)
 		}
 	}
 	err = cs.Flush()
 	if err != nil {
-		return
+		panic(err)
 	}
-	func() {
-		defer func() { recover() }()
-		cs.sCmdQueue <- cmd
-		k = make([]string, 0, len(keys))
-	}()
-	if k == nil {
-		return
-	}
-	for kv := range cs.resultQueue {
-		if kv == nil {
-			break
-		}
-		k = append(k, kv.Key)
+	cs.sCmd = cmd
+	cs.Receive(cs, cs.bf)
+	k = make([]string, 0, len(keys))
+	for _, key := range cs.rCmd.Args {
+		k = append(k, key)
 	}
 	return
 }
