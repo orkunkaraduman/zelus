@@ -1,7 +1,6 @@
 package client
 
 import (
-	"io"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -102,7 +101,7 @@ func (cs *connState) Get(keys []string, f GetFunc) (err error) {
 		cs.mu.Unlock()
 	}()
 	if cs.Done() {
-		panic(io.EOF)
+		panic(nil)
 	}
 	cmd := protocol.Cmd{Name: "GET", Args: keys}
 	err = cs.SendCmd(cmd)
@@ -115,7 +114,9 @@ func (cs *connState) Get(keys []string, f GetFunc) (err error) {
 	}
 	cs.sCmd = cmd
 	cs.gf = f
-	cs.Receive(cs, cs.bf)
+	if !cs.Receive(cs, cs.bf) {
+		panic(nil)
+	}
 	return
 }
 
@@ -127,7 +128,7 @@ func (cs *connState) Set(keys []string, vals [][]byte) (k []string, err error) {
 		cs.mu.Unlock()
 	}()
 	if cs.Done() {
-		panic(io.EOF)
+		panic(nil)
 	}
 	cmd := protocol.Cmd{Name: "SET", Args: keys}
 	err = cs.SendCmd(cmd)
@@ -146,7 +147,9 @@ func (cs *connState) Set(keys []string, vals [][]byte) (k []string, err error) {
 		panic(err)
 	}
 	cs.sCmd = cmd
-	cs.Receive(cs, cs.bf)
+	if !cs.Receive(cs, cs.bf) {
+		panic(nil)
+	}
 	k = make([]string, 0, len(keys))
 	for _, key := range cs.rCmd.Args {
 		k = append(k, key)
