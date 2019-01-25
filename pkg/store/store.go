@@ -101,7 +101,12 @@ func (st *Store) set(key string, val []byte, ua updateAction) bool {
 	nd.KeyHash = keyHash
 	index, offset := nd.Last()
 	switch {
-	case ua == updateActionReplace || foundNdIdx < 0:
+	case ua == updateActionNone || ua == updateActionReplace || foundNdIdx < 0:
+		if val == nil {
+			sl.DelNode(st.slotPool, st.dataPool, ndIdx)
+			sl.Mu.Unlock()
+			return true
+		}
 		if !nd.Set(st.slotPool, st.dataPool, bKeyLen+valLen) {
 			if foundNdIdx < 0 {
 				sl.DelNode(st.slotPool, st.dataPool, ndIdx)
@@ -110,6 +115,7 @@ func (st *Store) set(key string, val []byte, ua updateAction) bool {
 			return false
 		}
 		index = 0
+		offset = 0
 	case ua == updateActionAppend:
 		if !nd.Alloc(st.slotPool, st.dataPool, valLen) {
 			sl.Mu.Unlock()
@@ -117,15 +123,15 @@ func (st *Store) set(key string, val []byte, ua updateAction) bool {
 		}
 		bKeyIdx = bKeyLen
 	}
-	for ; valIdx < valLen; index++ {
+	for ; bKeyIdx < bKeyLen || valIdx < valLen; index++ {
 		data := nd.Datas[index]
-		n := offset
 		if bKeyIdx < bKeyLen {
-			n = copy(data, bKey[bKeyIdx:])
+			n := copy(data[offset:], bKey[bKeyIdx:])
+			offset += n
 			bKeyIdx += n
 		}
-		if n < len(data) {
-			valIdx += copy(data[n:], val[valIdx:])
+		if offset < len(data) {
+			valIdx += copy(data[offset:], val[valIdx:])
 		}
 		offset = 0
 	}

@@ -56,7 +56,7 @@ func (cs *connState) OnReadCmd(cmd protocol.Cmd) (count int) {
 			panic(err)
 		}
 		for _, key := range keys {
-			var buf []byte
+			buf := cs.bf.Want(0)
 			if cs.st.Get(key, func(size int, index int, data []byte) {
 				if index == 0 {
 					buf = cs.bf.Want(size)
