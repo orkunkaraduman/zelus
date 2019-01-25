@@ -12,6 +12,15 @@ type Store struct {
 
 type GetFunc func(size int, index int, data []byte)
 
+type updateAction int
+
+const (
+	updateActionNone = updateAction(iota)
+	updateActionReplace
+	updateActionAppend
+	updateActionCas
+)
+
 func New(count int, size int) (st *Store) {
 	if count <= 0 {
 		return
@@ -27,6 +36,9 @@ func New(count int, size int) (st *Store) {
 
 func (st *Store) Get(key string, f GetFunc) bool {
 	bKey := getBKey(key)
+	if bKey == nil {
+		return false
+	}
 	keyHash := HashFunc(bKey)
 	slotIdx := keyHash % len(st.slots)
 	sl := &st.slots[slotIdx]
@@ -37,15 +49,10 @@ func (st *Store) Get(key string, f GetFunc) bool {
 		return false
 	}
 	nd := &sl.Nodes[ndIdx]
-	l := nd.Size
 	p := len(bKey)
-	l -= p
-	size := l
-	m := 0
-	for _, data := range nd.Datas {
-		if data == nil {
-			break
-		}
+	valIdx, valLen := 0, nd.Size-p
+	for index := 0; valIdx < valLen; index++ {
+		data := nd.Datas[index]
 		n, r := 0, len(data)
 		if p != 0 {
 			if r > p {
@@ -55,21 +62,20 @@ func (st *Store) Get(key string, f GetFunc) bool {
 			p -= r
 		}
 		if p == 0 {
-			//m += copy(val[m:], data[n:])
 			d := data[n:]
-			f(size, m, d)
-			l -= len(d)
-		}
-		if l <= 0 {
-			break
+			f(valLen, valIdx, d)
+			valIdx += len(d)
 		}
 	}
 	sl.Mu.Unlock()
 	return true
 }
 
-func (st *Store) Set(key string, val []byte, replace bool) bool {
+func (st *Store) set(key string, val []byte, ua updateAction) bool {
 	bKey := getBKey(key)
+	if bKey == nil {
+		return false
+	}
 	keyHash := HashFunc(bKey)
 	slotIdx := keyHash % len(st.slots)
 	sl := &st.slots[slotIdx]
@@ -77,7 +83,7 @@ func (st *Store) Set(key string, val []byte, replace bool) bool {
 	ndIdx := -1
 	foundNdIdx := sl.FindNode(keyHash, bKey)
 	if foundNdIdx >= 0 {
-		if !replace {
+		if ua == updateActionNone {
 			sl.Mu.Unlock()
 			return false
 		}
@@ -89,36 +95,61 @@ func (st *Store) Set(key string, val []byte, replace bool) bool {
 		sl.Mu.Unlock()
 		return false
 	}
+	bKeyIdx, bKeyLen := 0, len(bKey)
+	valIdx, valLen := 0, len(val)
 	nd := &sl.Nodes[ndIdx]
 	nd.KeyHash = keyHash
-	lbKey := len(bKey)
-	if !nd.Set(st.slotPool, st.dataPool, lbKey+len(val)) {
-		if foundNdIdx < 0 {
-			sl.DelNode(st.slotPool, st.dataPool, ndIdx)
+	index, offset := nd.Last()
+	switch {
+	case ua == updateActionReplace || foundNdIdx < 0:
+		if !nd.Set(st.slotPool, st.dataPool, bKeyLen+valLen) {
+			if foundNdIdx < 0 {
+				sl.DelNode(st.slotPool, st.dataPool, ndIdx)
+			}
+			sl.Mu.Unlock()
+			return false
 		}
-		sl.Mu.Unlock()
-		return false
+		index = 0
+	case ua == updateActionAppend:
+		if !nd.Alloc(st.slotPool, st.dataPool, valLen) {
+			sl.Mu.Unlock()
+			return false
+		}
+		bKeyIdx = bKeyLen
 	}
-	j, m := 0, 0
-	for _, data := range nd.Datas {
-		if data == nil {
-			break
-		}
-		n := 0
-		if j < lbKey {
-			n = copy(data, bKey[j:])
-			j += n
+	for ; valIdx < valLen; index++ {
+		data := nd.Datas[index]
+		n := offset
+		if bKeyIdx < bKeyLen {
+			n = copy(data, bKey[bKeyIdx:])
+			bKeyIdx += n
 		}
 		if n < len(data) {
-			m += copy(data[n:], val[m:])
+			valIdx += copy(data[n:], val[valIdx:])
 		}
+		offset = 0
 	}
 	sl.Mu.Unlock()
 	return true
 }
 
+func (st *Store) Set(key string, val []byte) bool {
+	return st.set(key, val, updateActionNone)
+}
+
+func (st *Store) Replace(key string, val []byte) bool {
+	return st.set(key, val, updateActionReplace)
+}
+
+func (st *Store) Append(key string, val []byte) bool {
+	return st.set(key, val, updateActionAppend)
+}
+
 func (st *Store) Del(key string) bool {
 	bKey := getBKey(key)
+	if bKey == nil {
+		return false
+	}
 	keyHash := HashFunc(bKey)
 	slotIdx := keyHash % len(st.slots)
 	sl := &st.slots[slotIdx]
@@ -129,33 +160,6 @@ func (st *Store) Del(key string) bool {
 		return false
 	}
 	sl.DelNode(st.slotPool, st.dataPool, ndIdx)
-	sl.Mu.Unlock()
-	return true
-}
-
-func (st *Store) Append(key string, val []byte) bool {
-	bKey := getBKey(key)
-	keyHash := HashFunc(bKey)
-	slotIdx := keyHash % len(st.slots)
-	sl := &st.slots[slotIdx]
-	sl.Mu.Lock()
-	ndIdx := sl.FindNode(keyHash, bKey)
-	if ndIdx < 0 {
-		sl.Mu.Unlock()
-		return false
-	}
-	nd := &sl.Nodes[ndIdx]
-	index, offset := nd.Last()
-	if !nd.Alloc(st.slotPool, st.dataPool, len(val)) {
-		sl.Mu.Unlock()
-		return false
-	}
-	valIdx, valLen := 0, len(val)
-	for valIdx < valLen {
-		valIdx += copy(nd.Datas[index][offset:], val[valIdx:])
-		index++
-		offset = 0
-	}
 	sl.Mu.Unlock()
 	return true
 }

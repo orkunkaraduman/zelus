@@ -14,14 +14,14 @@ type slot struct {
 }
 
 func (sl *slot) FindNode(keyHash int, bKey []byte) int {
-	lbKey := len(bKey)
-	if lbKey <= 0 {
+	bKeyLen := len(bKey)
+	if bKeyLen <= 0 {
 		return -1
 	}
 	for i := range sl.Nodes {
 		nd := &sl.Nodes[i]
 		if nd.KeyHash == keyHash {
-			o, p := 0, lbKey
+			o, p := 0, bKeyLen
 			for _, data := range nd.Datas {
 				r := len(data)
 				if r > p {
