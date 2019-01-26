@@ -74,8 +74,11 @@ func main() {
 		time.Sleep(250 * time.Microsecond)
 		<-sigIntCh
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		srv.Shutdown(ctx)
-		cancel()
+		defer cancel()
+		err := srv.Shutdown(ctx)
+		if err != nil {
+			logger.Println("Error:", err.Error())
+		}
 	}()
 	sigKillCh := make(chan os.Signal, 1)
 	signal.Notify(sigKillCh, os.Kill)
