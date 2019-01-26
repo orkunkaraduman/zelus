@@ -30,7 +30,6 @@ func main() {
 	if err != nil {
 		os.Exit(2)
 	}
-
 	defer func() {
 		if e, ok := recover().(error); ok {
 			fmt.Println("Error:", e.Error())
@@ -53,10 +52,10 @@ func main() {
 		}
 	}
 	defer closeFunc()
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, os.Interrupt)
+	sigIntCh := make(chan os.Signal, 1)
+	signal.Notify(sigIntCh, os.Interrupt)
 	go func() {
-		<-sigCh
+		<-sigIntCh
 		closeFunc()
 	}()
 	for i := range cls {
