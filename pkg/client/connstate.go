@@ -252,6 +252,10 @@ func (cs *connState) Del(keys []string) (k []string, err error) {
 	if err != nil {
 		panic(err)
 	}
+	err = cs.Flush()
+	if err != nil {
+		panic(err)
+	}
 	cs.sCmd = cmd
 	if !cs.Receive(cs, cs.bf) {
 		panic(nil)
