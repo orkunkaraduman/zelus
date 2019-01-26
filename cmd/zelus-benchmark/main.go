@@ -98,6 +98,10 @@ func main() {
 				switch test {
 				case "SET":
 					go set(cls[i], keys[n:n+l], int(ca.Multi), int(ca.Datasize), brChs[i], &count)
+				case "GET":
+					go get(cls[i], keys[n:n+l], int(ca.Multi), int(ca.Datasize), brChs[i], &count)
+				case "DEL":
+					go del(cls[i], keys[n:n+l], int(ca.Multi), int(ca.Datasize), brChs[i], &count)
 				default:
 					panic(fmt.Errorf("test %s is unknown", test))
 				}
