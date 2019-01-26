@@ -3,7 +3,6 @@ package client
 import (
 	"net"
 	"sync"
-	"sync/atomic"
 
 	"github.com/orkunkaraduman/zelus/pkg/buffer"
 	"github.com/orkunkaraduman/zelus/pkg/protocol"
@@ -14,8 +13,8 @@ type connState struct {
 	*protocol.Protocol
 	bf *buffer.Buffer
 
-	mu   sync.Mutex
-	done int32
+	mu     sync.Mutex
+	closed bool
 
 	rCmd protocol.Cmd
 	sCmd protocol.Cmd
@@ -67,20 +66,17 @@ func (cs *connState) OnQuit(e error) {
 	}
 }
 
-func (cs *connState) Done() bool {
-	return atomic.LoadInt32(&cs.done) != 0
-}
-
 func (cs *connState) Close(e error) {
-	if cs.Done() {
+	cs.mu.Lock()
+	if cs.closed {
+		cs.mu.Unlock()
 		return
 	}
-	cs.mu.Lock()
 	defer func() {
 		cs.bf.Close()
 		cs.Flush()
 		cs.conn.Close()
-		atomic.CompareAndSwapInt32(&cs.done, 0, 1)
+		cs.closed = true
 		cs.mu.Unlock()
 	}()
 	if e != nil {
@@ -96,6 +92,13 @@ func (cs *connState) Close(e error) {
 	cs.SendCmd(protocol.Cmd{Name: "QUIT"})
 }
 
+func (cs *connState) IsClosed() bool {
+	cs.mu.Lock()
+	r := cs.closed
+	cs.mu.Unlock()
+	return r
+}
+
 func (cs *connState) Get(keys []string, f GetFunc) (err error) {
 	cs.mu.Lock()
 	defer func() {
@@ -103,7 +106,7 @@ func (cs *connState) Get(keys []string, f GetFunc) (err error) {
 		cs.OnQuit(err)
 		cs.mu.Unlock()
 	}()
-	if cs.Done() {
+	if cs.closed {
 		panic(nil)
 	}
 	cmd := protocol.Cmd{Name: "GET", Args: keys}
@@ -130,7 +133,7 @@ func (cs *connState) Set(keys []string, vals [][]byte) (k []string, err error) {
 		cs.OnQuit(err)
 		cs.mu.Unlock()
 	}()
-	if cs.Done() {
+	if cs.closed {
 		panic(nil)
 	}
 	cmd := protocol.Cmd{Name: "SET", Args: keys}
@@ -167,7 +170,7 @@ func (cs *connState) Replace(keys []string, vals [][]byte) (k []string, err erro
 		cs.OnQuit(err)
 		cs.mu.Unlock()
 	}()
-	if cs.Done() {
+	if cs.closed {
 		panic(nil)
 	}
 	cmd := protocol.Cmd{Name: "REPLACE", Args: keys}
@@ -204,7 +207,7 @@ func (cs *connState) Append(keys []string, vals [][]byte) (k []string, err error
 		cs.OnQuit(err)
 		cs.mu.Unlock()
 	}()
-	if cs.Done() {
+	if cs.closed {
 		panic(nil)
 	}
 	cmd := protocol.Cmd{Name: "APPEND", Args: keys}
@@ -241,7 +244,7 @@ func (cs *connState) Del(keys []string, vals [][]byte) (k []string, err error) {
 		cs.OnQuit(err)
 		cs.mu.Unlock()
 	}()
-	if cs.Done() {
+	if cs.closed {
 		panic(nil)
 	}
 	cmd := protocol.Cmd{Name: "DEL", Args: keys}

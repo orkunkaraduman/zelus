@@ -45,7 +45,7 @@ func (cl *Client) Shutdown(ctx context.Context) (err error) {
 	for {
 		select {
 		case <-time.After(5 * time.Millisecond):
-			if cl.cs.Done() {
+			if cl.cs.IsClosed() {
 				err = cl.conn.Close()
 				return
 			}
