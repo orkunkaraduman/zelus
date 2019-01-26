@@ -42,6 +42,10 @@ func (srv *Server) Shutdown(ctx context.Context) error {
 	return srv.ac.Shutdown(ctx)
 }
 
+func (srv *Server) Close() error {
+	return srv.ac.Close()
+}
+
 func (srv *Server) serve(conn net.Conn, closeCh <-chan struct{}) {
 	if ConnBufferSize > 0 {
 		if tcpConn, ok := conn.(*net.TCPConn); ok {
