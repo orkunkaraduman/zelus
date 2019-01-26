@@ -73,7 +73,7 @@ func (cs *connState) OnReadCmd(cmd protocol.Cmd) (count int) {
 		}
 		return
 	}
-	if cs.rCmd.Name == "SET" || cs.rCmd.Name == "REPLACE" || cs.rCmd.Name == "APPEND" {
+	if cs.rCmd.Name == "SET" || cs.rCmd.Name == "PUT" || cs.rCmd.Name == "APPEND" {
 		count = len(cs.rCmd.Args)
 		if count > 0 {
 			return
@@ -106,7 +106,7 @@ func (cs *connState) OnReadCmd(cmd protocol.Cmd) (count int) {
 
 func (cs *connState) OnReadData(count int, index int, data []byte) {
 	var err error
-	if cs.rCmd.Name == "SET" || cs.rCmd.Name == "REPLACE" || cs.rCmd.Name == "APPEND" {
+	if cs.rCmd.Name == "SET" || cs.rCmd.Name == "PUT" || cs.rCmd.Name == "APPEND" {
 		key := cs.rCmd.Args[index]
 		if key != "" {
 			switch cs.rCmd.Name {
@@ -114,8 +114,8 @@ func (cs *connState) OnReadData(count int, index int, data []byte) {
 				if !cs.st.Set(key, data) {
 					cs.rCmd.Args[index] = ""
 				}
-			case "REPLACE":
-				if !cs.st.Replace(key, data) {
+			case "PUT":
+				if !cs.st.Put(key, data) {
 					cs.rCmd.Args[index] = ""
 				}
 			case "APPEND":
