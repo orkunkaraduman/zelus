@@ -70,3 +70,15 @@ func (cl *Client) Get(keys []string, f GetFunc) (err error) {
 func (cl *Client) Set(keys []string, vals [][]byte) (k []string, err error) {
 	return cl.cs.Set(keys, vals)
 }
+
+func (cl *Client) Put(keys []string, vals [][]byte) (k []string, err error) {
+	return cl.cs.Put(keys, vals)
+}
+
+func (cl *Client) Append(keys []string, vals [][]byte) (k []string, err error) {
+	return cl.cs.Append(keys, vals)
+}
+
+func (cl *Client) Del(keys []string) (k []string, err error) {
+	return cl.cs.Del(keys)
+}

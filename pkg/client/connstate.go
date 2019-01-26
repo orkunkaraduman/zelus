@@ -41,7 +41,7 @@ func (cs *connState) OnReadCmd(cmd protocol.Cmd) (count int) {
 			count = len(cs.rCmd.Args)
 			return
 		}
-		if cs.sCmd.Name == "SET" || cs.sCmd.Name == "REPLACE" || cs.sCmd.Name == "APPEND" {
+		if cs.sCmd.Name == "SET" || cs.sCmd.Name == "PUT" || cs.sCmd.Name == "APPEND" {
 			return
 		}
 		if cs.sCmd.Name == "DEL" {
@@ -163,7 +163,7 @@ func (cs *connState) Set(keys []string, vals [][]byte) (k []string, err error) {
 	return
 }
 
-func (cs *connState) Replace(keys []string, vals [][]byte) (k []string, err error) {
+func (cs *connState) Put(keys []string, vals [][]byte) (k []string, err error) {
 	cs.mu.Lock()
 	defer func() {
 		err, _ = recover().(error)
@@ -173,7 +173,7 @@ func (cs *connState) Replace(keys []string, vals [][]byte) (k []string, err erro
 	if cs.closed {
 		panic(nil)
 	}
-	cmd := protocol.Cmd{Name: "REPLACE", Args: keys}
+	cmd := protocol.Cmd{Name: "PUT", Args: keys}
 	err = cs.SendCmd(cmd)
 	if err != nil {
 		panic(err)
@@ -237,7 +237,7 @@ func (cs *connState) Append(keys []string, vals [][]byte) (k []string, err error
 	return
 }
 
-func (cs *connState) Del(keys []string, vals [][]byte) (k []string, err error) {
+func (cs *connState) Del(keys []string) (k []string, err error) {
 	cs.mu.Lock()
 	defer func() {
 		err, _ = recover().(error)
