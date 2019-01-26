@@ -5,102 +5,146 @@ import (
 	"log"
 	"net/http"
 	_ "net/http/pprof"
-	"sync"
+	"os"
+	"os/signal"
+	"runtime"
+	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/orkunkaraduman/zelus/pkg/client"
+	"github.com/orkunkaraduman/zelus/pkg/protocol"
 )
 
-var wg sync.WaitGroup
-
-func set(start, stop int) {
-	keys := make([]string, stop-start)
-	for i := start; i < stop; i++ {
-		keys[i-start] = fmt.Sprintf("%d", i)
-	}
-	l := 16
-	k1 := make([]string, 0, l)
-	v1 := make([][]byte, 0, l)
-	cl, err := client.New("unix", "/tmp/zelus.sock")
-	//cl, err := client.New("tcp", "127.0.0.1:1234")
-	if err != nil {
-		panic(err)
-	}
-	var buf [4096]byte
-	fmt.Println(time.Now(), "set", "start")
-	for i := start; i < stop; i += l {
-		k1 = k1[:0]
-		v1 = v1[:0]
-		for j := 0; j < l; j++ {
-			k1 = append(k1, keys[i+j-start])
-			v1 = append(v1, buf[:])
-		}
-		k, _ := cl.Set(k1, v1)
-		if len(k) != l {
-			panic(i)
-			break
-		}
-	}
-	fmt.Println(time.Now(), "set", "end")
-	err = cl.Close()
-	if err != nil {
-		panic(err)
-	}
-	wg.Done()
-}
-
-func get(start, stop int) {
-	keys := make([]string, stop-start)
-	for i := start; i < stop; i++ {
-		keys[i-start] = fmt.Sprintf("%d", i)
-	}
-	l := 16
-	k1 := make([]string, 0, l)
-	cl, err := client.New("unix", "/tmp/zelus.sock")
-	//cl, err := client.New("tcp", "127.0.0.1:1234")
-	if err != nil {
-		panic(err)
-	}
-	fmt.Println(time.Now(), "get", "start")
-	for i := start; i < stop; i += l {
-		k1 = k1[:0]
-		for j := 0; j < l; j++ {
-			k1 = append(k1, keys[i+j-start])
-		}
-		k, _, _ := cl.Get(k1)
-		if len(k) != l {
-			panic(i)
-			break
-		}
-	}
-	fmt.Println(time.Now(), "get", "end")
-	err = cl.Close()
-	if err != nil {
-		panic(err)
-	}
-	wg.Done()
-}
-
 func main() {
-	go func() {
-		log.Println(http.ListenAndServe("localhost:6061", nil))
+	fmt.Printf("zelus-benchmark\n\n")
+	pp := os.Getenv("PPROF")
+	if pp != "" {
+		go func() {
+			log.Fatalln(http.ListenAndServe(pp, nil))
+		}()
+	}
+	var err error
+	ca := newCmdArgs(os.Stdout)
+	err = ca.Parse(os.Args[1:])
+	if err != nil {
+		os.Exit(2)
+	}
+
+	defer func() {
+		if e, ok := recover().(error); ok {
+			fmt.Println("Error:", e.Error())
+			fmt.Println("")
+			os.Exit(1)
+		}
+		fmt.Println("")
 	}()
 
-	client.ConnBuffer = 1024 * 1024
-
-	for {
-		for i := 0; i < 16; i++ {
-			wg.Add(1)
-			go set(i*512*1024*1024/4096, (i+1)*512*1024*1024/4096)
+	fmt.Printf("Connecting clients to server...\n")
+	protocol.BufferSize = 1 * 1024 * 1024
+	client.ConnBufferSize = 1 * 1024 * 1024
+	cls := make([]*client.Client, ca.Clients)
+	closeFunc := func() {
+		for _, cl := range cls {
+			if cl == nil {
+				continue
+			}
+			cl.Close()
 		}
-		wg.Wait()
-		time.Sleep(1 * time.Second)
-
-		for i := 0; i < 16; i++ {
-			wg.Add(1)
-			go get(i*512*1024*1024/4096, (i+1)*512*1024*1024/4096)
+	}
+	defer closeFunc()
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt)
+	go func() {
+		<-sigCh
+		closeFunc()
+	}()
+	for i := range cls {
+		if ca.Socket == "" {
+			cls[i], err = client.New("tcp", ca.Hostname)
+		} else {
+			cls[i], err = client.New("unix", ca.Socket)
 		}
-		wg.Wait()
-		time.Sleep(1 * time.Second)
+		if err != nil {
+			panic(err)
+		}
+	}
+
+	fmt.Printf("Preparing...\n\n")
+	brChs := make([]chan benchmarkResult, ca.Clients)
+	for i := range brChs {
+		brChs[i] = make(chan benchmarkResult)
+	}
+	keys := make([]string, ca.Requests)
+	for i := range keys {
+		keys[i] = fmt.Sprintf("%s%d", ca.Prefix, i)
+	}
+	fmt.Printf("Number of clients:  %d\nNumber of requests: %d\n\n\n", ca.Clients, ca.Requests)
+
+	numberOfRequests := int(ca.Requests)
+	requestsPerClient := int(ca.Requests / ca.Clients)
+	tests := strings.Split(strings.ToUpper(ca.Tests), ",")
+	err = nil
+	for err == nil {
+		for _, test := range tests {
+			test = strings.TrimSpace(test)
+			count := int64(0)
+			n, m := 0, numberOfRequests-requestsPerClient*len(cls)
+			for i := range cls {
+				l := requestsPerClient
+				if m > 0 {
+					l++
+					m--
+				}
+				switch test {
+				case "SET":
+					go set(cls[i], keys[n:n+l], int(ca.Multi), int(ca.Datasize), brChs[i], &count)
+				default:
+					panic(fmt.Errorf("test %s is unknown", test))
+				}
+				n += l
+			}
+			startTm := time.Now()
+			lastCount := int64(0)
+			lastNs := startTm.UnixNano()
+			tk := time.NewTicker(1 * time.Second)
+			go func() {
+				for now := range tk.C {
+					ns := now.UnixNano()
+					currCount := atomic.LoadInt64(&count)
+					fmt.Printf("%12d/%d: %d req/s\n",
+						count,
+						len(keys),
+						1000000000*(currCount-lastCount)/(ns-lastNs),
+					)
+					lastCount = currCount
+					lastNs = ns
+				}
+			}()
+			fmt.Printf("Test %s started.\n", test)
+			tbr := benchmarkResult{}
+			for _, brCh := range brChs {
+				br := <-brCh
+				if err == nil {
+					err = br.err
+				}
+				tbr.count += br.count
+				tbr.duration += br.duration
+			}
+			tk.Stop()
+			runtime.Gosched()
+			ns := tbr.duration.Nanoseconds() / int64(len(cls))
+			fmt.Printf("\n Number of requests:  %d\n Avarage duration:    %v\n Requests per second: %d\n\n\n",
+				tbr.count,
+				time.Duration(ns),
+				1000000000*tbr.count/ns,
+			)
+			if err != nil {
+				break
+			}
+		}
+		if !ca.Loop {
+			break
+		}
 	}
 }
