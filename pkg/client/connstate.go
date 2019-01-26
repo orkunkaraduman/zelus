@@ -42,7 +42,10 @@ func (cs *connState) OnReadCmd(cmd protocol.Cmd) (count int) {
 			count = len(cs.rCmd.Args)
 			return
 		}
-		if cs.sCmd.Name == "SET" {
+		if cs.sCmd.Name == "SET" || cs.sCmd.Name == "REPLACE" || cs.sCmd.Name == "APPEND" {
+			return
+		}
+		if cs.sCmd.Name == "DEL" {
 			return
 		}
 	}
@@ -143,6 +146,106 @@ func (cs *connState) Set(keys []string, vals [][]byte) (k []string, err error) {
 		}
 	}
 	err = cs.Flush()
+	if err != nil {
+		panic(err)
+	}
+	cs.sCmd = cmd
+	if !cs.Receive(cs, cs.bf) {
+		panic(nil)
+	}
+	k = make([]string, 0, len(keys))
+	for _, key := range cs.rCmd.Args {
+		k = append(k, key)
+	}
+	return
+}
+
+func (cs *connState) Replace(keys []string, vals [][]byte) (k []string, err error) {
+	cs.mu.Lock()
+	defer func() {
+		err, _ = recover().(error)
+		cs.OnQuit(err)
+		cs.mu.Unlock()
+	}()
+	if cs.Done() {
+		panic(nil)
+	}
+	cmd := protocol.Cmd{Name: "REPLACE", Args: keys}
+	err = cs.SendCmd(cmd)
+	if err != nil {
+		panic(err)
+	}
+	for i := range keys {
+		val := vals[i]
+		err = cs.SendData(val)
+		if err != nil {
+			panic(err)
+		}
+	}
+	err = cs.Flush()
+	if err != nil {
+		panic(err)
+	}
+	cs.sCmd = cmd
+	if !cs.Receive(cs, cs.bf) {
+		panic(nil)
+	}
+	k = make([]string, 0, len(keys))
+	for _, key := range cs.rCmd.Args {
+		k = append(k, key)
+	}
+	return
+}
+
+func (cs *connState) Append(keys []string, vals [][]byte) (k []string, err error) {
+	cs.mu.Lock()
+	defer func() {
+		err, _ = recover().(error)
+		cs.OnQuit(err)
+		cs.mu.Unlock()
+	}()
+	if cs.Done() {
+		panic(nil)
+	}
+	cmd := protocol.Cmd{Name: "APPEND", Args: keys}
+	err = cs.SendCmd(cmd)
+	if err != nil {
+		panic(err)
+	}
+	for i := range keys {
+		val := vals[i]
+		err = cs.SendData(val)
+		if err != nil {
+			panic(err)
+		}
+	}
+	err = cs.Flush()
+	if err != nil {
+		panic(err)
+	}
+	cs.sCmd = cmd
+	if !cs.Receive(cs, cs.bf) {
+		panic(nil)
+	}
+	k = make([]string, 0, len(keys))
+	for _, key := range cs.rCmd.Args {
+		k = append(k, key)
+	}
+	return
+}
+
+func (cs *connState) Del(keys []string, vals [][]byte) (k []string, err error) {
+	cs.mu.Lock()
+	defer func() {
+		err, _ = recover().(error)
+		cs.OnQuit(err)
+		cs.mu.Unlock()
+	}()
+	if cs.Done() {
+		panic(nil)
+	}
+	cmd := protocol.Cmd{Name: "DEL", Args: keys}
+	err = cs.SendCmd(cmd)
 	if err != nil {
 		panic(err)
 	}

@@ -14,7 +14,7 @@ type Client struct {
 type GetFunc func(key string, val []byte)
 
 var (
-	ConnBuffer = 0
+	ConnBufferSize = 0
 )
 
 func New(network, address string) (cl *Client, err error) {
@@ -23,14 +23,14 @@ func New(network, address string) (cl *Client, err error) {
 	if err != nil {
 		return
 	}
-	if ConnBuffer > 0 {
+	if ConnBufferSize > 0 {
 		if tcpConn, ok := conn.(*net.TCPConn); ok {
-			tcpConn.SetReadBuffer(ConnBuffer)
-			tcpConn.SetWriteBuffer(ConnBuffer)
+			tcpConn.SetReadBuffer(ConnBufferSize)
+			tcpConn.SetWriteBuffer(ConnBufferSize)
 		}
 		if unixConn, ok := conn.(*net.UnixConn); ok {
-			unixConn.SetReadBuffer(ConnBuffer)
-			unixConn.SetWriteBuffer(ConnBuffer)
+			unixConn.SetReadBuffer(ConnBufferSize)
+			unixConn.SetWriteBuffer(ConnBufferSize)
 		}
 	}
 	cl = &Client{
