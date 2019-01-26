@@ -28,7 +28,7 @@ func set(st *store.Store, start, stop int) {
 	var buf [10 * 4096]byte
 	i, r := 0, false
 	for i = start; i < stop; i++ {
-		r = st.Set(keys[i-start], buf[0:4096], true)
+		r = st.Set(keys[i-start], buf[0:4096])
 		if !r {
 			break
 		}
