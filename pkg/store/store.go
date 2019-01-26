@@ -18,7 +18,6 @@ const (
 	updateActionNone = updateAction(iota)
 	updateActionReplace
 	updateActionAppend
-	updateActionCas
 )
 
 func New(count int, size int) (st *Store) {
@@ -71,7 +70,7 @@ func (st *Store) Get(key string, f GetFunc) bool {
 	return true
 }
 
-func (st *Store) set(key string, val []byte, ua updateAction) bool {
+func (st *Store) write(key string, val []byte, ua updateAction) bool {
 	bKey := getBKey(key)
 	if bKey == nil {
 		return false
@@ -140,15 +139,15 @@ func (st *Store) set(key string, val []byte, ua updateAction) bool {
 }
 
 func (st *Store) Set(key string, val []byte) bool {
-	return st.set(key, val, updateActionNone)
+	return st.write(key, val, updateActionReplace)
 }
 
-func (st *Store) Replace(key string, val []byte) bool {
-	return st.set(key, val, updateActionReplace)
+func (st *Store) Put(key string, val []byte) bool {
+	return st.write(key, val, updateActionNone)
 }
 
 func (st *Store) Append(key string, val []byte) bool {
-	return st.set(key, val, updateActionAppend)
+	return st.write(key, val, updateActionAppend)
 }
 
 func (st *Store) Del(key string) bool {
