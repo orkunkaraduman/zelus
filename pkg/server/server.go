@@ -16,7 +16,7 @@ type Server struct {
 }
 
 var (
-	ConnBuffer = 0
+	ConnBufferSize = 0
 )
 
 func New(st *store.Store) (srv *Server) {
@@ -43,14 +43,14 @@ func (srv *Server) Shutdown(ctx context.Context) error {
 }
 
 func (srv *Server) serve(conn net.Conn, closeCh <-chan struct{}) {
-	if ConnBuffer > 0 {
+	if ConnBufferSize > 0 {
 		if tcpConn, ok := conn.(*net.TCPConn); ok {
-			tcpConn.SetReadBuffer(ConnBuffer)
-			tcpConn.SetWriteBuffer(ConnBuffer)
+			tcpConn.SetReadBuffer(ConnBufferSize)
+			tcpConn.SetWriteBuffer(ConnBufferSize)
 		}
 		if unixConn, ok := conn.(*net.UnixConn); ok {
-			unixConn.SetReadBuffer(ConnBuffer)
-			unixConn.SetWriteBuffer(ConnBuffer)
+			unixConn.SetReadBuffer(ConnBufferSize)
+			unixConn.SetWriteBuffer(ConnBufferSize)
 		}
 	}
 	cs := newConnState(conn)

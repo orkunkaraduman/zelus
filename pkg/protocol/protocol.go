@@ -19,12 +19,13 @@ type Protocol struct {
 
 var (
 	MaxLineLen = 64 * 1024
+	BufferSize = MaxLineLen * 2
 )
 
 func New(r io.Reader, w io.Writer) (prt *Protocol) {
 	prt = &Protocol{
-		rd:        bufio.NewReaderSize(r, MaxLineLen*2),
-		wr:        bufio.NewWriterSize(w, MaxLineLen*2),
+		rd:        bufio.NewReaderSize(r, BufferSize),
+		wr:        bufio.NewWriterSize(w, BufferSize),
 		cmdParser: NewCmdParser(),
 	}
 	return
