@@ -137,8 +137,10 @@ func main() {
 			tk.Stop()
 			runtime.Gosched()
 			ns := tbr.duration.Nanoseconds() / int64(len(cls))
-			fmt.Printf("\n Number of requests:  %d\n Avarage duration:    %v\n Requests per second: %d\n\n\n",
+			fmt.Printf("\n Number of requests:  %d/%d (%.2f%%)\n Avarage duration:    %v\n Requests per second: %d\n\n\n",
 				tbr.count,
+				numberOfRequests,
+				float64(100*tbr.count)/float64(numberOfRequests),
 				time.Duration(ns),
 				1000000000*tbr.count/ns,
 			)

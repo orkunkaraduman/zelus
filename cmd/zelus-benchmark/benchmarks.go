@@ -34,11 +34,7 @@ func set(cl *client.Client, keys []string, multi int, datasize int, brCh chan be
 		var k []string
 		k, err = cl.Set(k1, v1)
 		atomic.AddInt64(count, int64(len(k)))
-		if err != nil {
-			i -= j
-			break
-		}
-		if len(k) != len(k1) {
+		if err != nil || len(k) != len(k1) {
 			i -= j
 			i += len(k)
 			break
@@ -65,14 +61,12 @@ func get(cl *client.Client, keys []string, multi int, datasize int, brCh chan be
 		}
 		k = k[:0]
 		err = cl.Get(k1, func(key string, val []byte) {
-			k = append(k, key)
+			if val != nil {
+				k = append(k, key)
+			}
 		})
 		atomic.AddInt64(count, int64(len(k)))
-		if err != nil {
-			i -= j
-			break
-		}
-		if len(k) != len(k1) {
+		if err != nil || len(k) != len(k1) {
 			i -= j
 			i += len(k)
 			break
@@ -99,11 +93,7 @@ func del(cl *client.Client, keys []string, multi int, datasize int, brCh chan be
 		var k []string
 		k, err = cl.Del(k1)
 		atomic.AddInt64(count, int64(len(k)))
-		if err != nil {
-			i -= j
-			break
-		}
-		if len(k) != len(k1) {
+		if err != nil || len(k) != len(k1) {
 			i -= j
 			i += len(k)
 			break
