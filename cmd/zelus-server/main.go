@@ -11,7 +11,6 @@ import (
 	"os/signal"
 	"time"
 
-	"github.com/orkunkaraduman/zelus/pkg/malloc"
 	"github.com/orkunkaraduman/zelus/pkg/protocol"
 	"github.com/orkunkaraduman/zelus/pkg/server"
 	"github.com/orkunkaraduman/zelus/pkg/store"
@@ -63,7 +62,8 @@ func main() {
 
 	logger.Printf("Allocating %dMiB of memory...\n", ca.Capacity)
 	size := int(ca.Capacity) * 1024 * 1024
-	count := size / (4 * malloc.MinLength)
+	//count := size / (4 * malloc.MinLength)
+	count := size / 4096
 	st := store.New(count, size)
 	srv := server.New(st)
 
