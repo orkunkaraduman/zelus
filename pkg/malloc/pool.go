@@ -56,6 +56,14 @@ func (p *Pool) Grow(n int) int {
 	return m
 }
 
+func (p *Pool) Close() {
+	p.mu.RLock()
+	for _, a := range p.arenas {
+		a.Close()
+	}
+	p.mu.RUnlock()
+}
+
 func (p *Pool) alloc(size int, block bool) []byte {
 	p.mu.RLock()
 	var ptr []byte

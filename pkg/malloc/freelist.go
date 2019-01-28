@@ -10,6 +10,7 @@ type freeList struct {
 	list       []uint8
 	queue      []chan int
 	dispatchCh chan struct{}
+	done       int32
 }
 
 const (
@@ -56,10 +57,10 @@ func (f *freeList) filledSize() int {
 }
 
 func (f *freeList) dispatch() {
-	for {
+	for f.done == 0 {
 		<-f.dispatchCh
 		offset, length, high := 0, 1<<MinHigh, MinHigh
-		for offset < f.size {
+		for f.done == 0 && offset < f.size {
 			high = f.get(offset)
 			if high < 0 {
 				offset += length
@@ -76,11 +77,7 @@ func (f *freeList) dispatch() {
 				}
 			}
 			offset += length
-			/*if len(c) >= cap(c) {
-				time.Sleep(5 * time.Millisecond)
-			}*/
 		}
-		//time.Sleep(5 * time.Millisecond)
 	}
 }
 
