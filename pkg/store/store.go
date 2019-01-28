@@ -33,6 +33,11 @@ func New(count int, size int) (st *Store) {
 	return
 }
 
+func (st *Store) Close() {
+	st.slotPool.Close()
+	st.dataPool.Close()
+}
+
 func (st *Store) Get(key string, f GetFunc) bool {
 	bKey := getBKey(key)
 	if bKey == nil {
