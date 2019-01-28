@@ -1,13 +1,18 @@
 package store
 
 import (
+	"sync/atomic"
+	"time"
+
 	"github.com/orkunkaraduman/zelus/pkg/malloc"
 )
 
 type Store struct {
-	slots    []slot
-	slotPool *malloc.Pool
-	dataPool *malloc.Pool
+	slots      []slot
+	slotPool   *malloc.Pool
+	dataPool   *malloc.Pool
+	disposerCh chan struct{}
+	done       int32
 }
 
 type GetFunc func(size int, index int, data []byte)
@@ -26,16 +31,51 @@ func New(count int, size int) (st *Store) {
 	}
 	p := malloc.AllocPool(size)
 	st = &Store{
-		slots:    make([]slot, count),
-		slotPool: p,
-		dataPool: p,
+		slots:      make([]slot, count),
+		slotPool:   p,
+		dataPool:   p,
+		disposerCh: make(chan struct{}),
 	}
+	go st.disposer()
 	return
 }
 
 func (st *Store) Close() {
+	atomic.StoreInt32(&st.done, 1)
+	select {
+	case st.disposerCh <- struct{}{}:
+	default:
+	}
 	st.slotPool.Close()
 	st.dataPool.Close()
+}
+
+func (st *Store) disposer() {
+	tk := time.NewTicker(60 * time.Second)
+	for st.done == 0 {
+		select {
+		case <-tk.C:
+		case <-st.disposerCh:
+		}
+		for i := range st.slots {
+			if st.done != 0 {
+				break
+			}
+			sl := &st.slots[i]
+			sl.Mu.Lock()
+			for j := 0; j < len(sl.Nodes); j++ {
+				if st.done != 0 {
+					break
+				}
+				nd := &sl.Nodes[j]
+				if nd.KeyHash >= 0 && nd.Expiry > 0 && nd.Expiry < time.Now().Unix() {
+					sl.DelNode(st.slotPool, st.dataPool, j)
+				}
+			}
+			sl.Mu.Unlock()
+		}
+	}
+	tk.Stop()
 }
 
 func (st *Store) Get(key string, f GetFunc) bool {
@@ -53,6 +93,10 @@ func (st *Store) Get(key string, f GetFunc) bool {
 		return false
 	}
 	nd := &sl.Nodes[ndIdx]
+	if nd.Expiry > 0 && nd.Expiry < time.Now().Unix() {
+		sl.Mu.Unlock()
+		return false
+	}
 	p := len(bKey)
 	valIdx, valLen := 0, nd.Size-p
 	for index := 0; valIdx < valLen; index++ {
@@ -75,7 +119,7 @@ func (st *Store) Get(key string, f GetFunc) bool {
 	return true
 }
 
-func (st *Store) write(key string, val []byte, ua updateAction) bool {
+func (st *Store) write(key string, val []byte, ua updateAction, expiry int64) bool {
 	bKey := getBKey(key)
 	if bKey == nil {
 		return false
@@ -85,9 +129,11 @@ func (st *Store) write(key string, val []byte, ua updateAction) bool {
 	sl := &st.slots[slotIdx]
 	sl.Mu.Lock()
 	ndIdx := -1
+	var foundNd *node
 	foundNdIdx := sl.FindNode(keyHash, bKey)
 	if foundNdIdx >= 0 {
-		if ua == updateActionNone {
+		foundNd = &sl.Nodes[foundNdIdx]
+		if ua == updateActionNone && (foundNd.Expiry <= 0 || foundNd.Expiry >= time.Now().Unix()) {
 			sl.Mu.Unlock()
 			return false
 		}
@@ -120,6 +166,7 @@ func (st *Store) write(key string, val []byte, ua updateAction) bool {
 		}
 		index = 0
 		offset = 0
+		nd.Expiry = expiry
 	case ua == updateActionAppend:
 		if !nd.Alloc(st.slotPool, st.dataPool, valLen) {
 			sl.Mu.Unlock()
@@ -143,16 +190,16 @@ func (st *Store) write(key string, val []byte, ua updateAction) bool {
 	return true
 }
 
-func (st *Store) Set(key string, val []byte) bool {
-	return st.write(key, val, updateActionReplace)
+func (st *Store) Set(key string, val []byte, expiry int64) bool {
+	return st.write(key, val, updateActionReplace, expiry)
 }
 
-func (st *Store) Put(key string, val []byte) bool {
-	return st.write(key, val, updateActionNone)
+func (st *Store) Put(key string, val []byte, expiry int64) bool {
+	return st.write(key, val, updateActionNone, expiry)
 }
 
 func (st *Store) Append(key string, val []byte) bool {
-	return st.write(key, val, updateActionAppend)
+	return st.write(key, val, updateActionAppend, 0)
 }
 
 func (st *Store) Del(key string) bool {

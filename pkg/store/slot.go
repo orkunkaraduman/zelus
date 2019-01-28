@@ -63,6 +63,7 @@ func (sl *slot) NewNode(slotPool *malloc.Pool) int {
 			newNodes[i].KeyHash = -1
 			newNodes[i].Datas = nil
 			newNodes[i].Size = 0
+			newNodes[i].Expiry = 0
 		}
 	}
 	if sl.Nodes != nil {
@@ -76,6 +77,8 @@ func (sl *slot) DelNode(slotPool, dataPool *malloc.Pool, idx int) {
 	nd := &sl.Nodes[idx]
 	nd.KeyHash = -1
 	nd.Free(slotPool, dataPool)
+	nd.Size = 0
+	nd.Expiry = 0
 	var zeroNode node
 	sizeOfNode := int(unsafe.Sizeof(zeroNode))
 	for i := range sl.Nodes {
@@ -93,6 +96,7 @@ type node struct {
 	KeyHash int
 	Datas   [][]byte
 	Size    int
+	Expiry  int64
 }
 
 func (nd *node) Alloc(slotPool, dataPool *malloc.Pool, size int) bool {

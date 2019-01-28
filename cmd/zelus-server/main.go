@@ -65,6 +65,7 @@ func main() {
 	//count := size / (4 * malloc.MinLength)
 	count := size / 4096
 	st := store.New(count, size)
+	defer st.Close()
 	srv := server.New(st)
 
 	logger.Printf("Accepting connections from %s", addr)

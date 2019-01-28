@@ -111,11 +111,11 @@ func (cs *connState) OnReadData(count int, index int, data []byte) {
 		if key != "" {
 			switch cs.rCmd.Name {
 			case "SET":
-				if !cs.st.Set(key, data) {
+				if !cs.st.Set(key, data, 0) {
 					cs.rCmd.Args[index] = ""
 				}
 			case "PUT":
-				if !cs.st.Put(key, data) {
+				if !cs.st.Put(key, data, 0) {
 					cs.rCmd.Args[index] = ""
 				}
 			case "APPEND":
