@@ -20,7 +20,7 @@ var (
 func New() (b *Buffer) {
 	b = &Buffer{
 		data:     make([]byte, MinSize),
-		cancelCh: make(chan struct{}, 1),
+		cancelCh: make(chan struct{}),
 	}
 	return
 }
@@ -28,7 +28,10 @@ func New() (b *Buffer) {
 func (b *Buffer) Close() {
 	b.mu.Lock()
 	b.data = nil
-	close(b.cancelCh)
+	select {
+	case b.cancelCh <- struct{}{}:
+	default:
+	}
 	b.mu.Unlock()
 }
 
