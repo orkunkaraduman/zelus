@@ -175,7 +175,7 @@ func (nd *node) Set(slotPool, dataPool *malloc.Pool, size int) bool {
 		return nd.Alloc(slotPool, dataPool, size-nd.Size)
 	}
 	sz := 0
-	for i, j := 0, len(nd.Datas); i < j; i++ {
+	for i := range nd.Datas {
 		if sz >= size {
 			dataPool.Free(nd.Datas[i])
 			nd.Datas[i] = nil
