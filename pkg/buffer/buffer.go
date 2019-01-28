@@ -40,7 +40,7 @@ func (b *Buffer) Want(size int) (buf []byte) {
 	if len(b.data) < size {
 		b.data = make([]byte, size*2)
 		close(b.cancelCh)
-		b.cancelCh = make(chan struct{}, 1)
+		b.cancelCh = make(chan struct{})
 		go b.disposer(b.cancelCh)
 	}
 	buf = b.data[:size]
