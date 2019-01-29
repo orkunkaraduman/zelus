@@ -32,7 +32,11 @@ func set(cl *client.Client, keys []string, multi int, datasize int, brCh chan be
 			i++
 		}
 		var k []string
-		k, err = cl.Set(k1, v1)
+		k, err = cl.Set(k1, func(index int, key string) (val []byte, expiry int) {
+			val = v1[index]
+			expiry = -1
+			return
+		})
 		atomic.AddInt64(count, int64(len(k)))
 		if err != nil || len(k) != len(k1) {
 			i -= j
@@ -60,7 +64,7 @@ func get(cl *client.Client, keys []string, multi int, datasize int, brCh chan be
 			i++
 		}
 		k = k[:0]
-		err = cl.Get(k1, func(key string, val []byte) {
+		err = cl.Get(k1, func(index int, key string, val []byte, expiry int) {
 			if val != nil {
 				k = append(k, key)
 			}

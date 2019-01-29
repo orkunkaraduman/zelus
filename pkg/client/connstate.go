@@ -54,7 +54,7 @@ func (cs *connState) OnReadCmd(cmd protocol.Cmd) (count int) {
 func (cs *connState) OnReadData(count int, index int, data []byte, expiry int) {
 	if cs.rCmd.Name == "OK" {
 		if cs.sCmd.Name == "GET" {
-			cs.gf(cs.rCmd.Args[index], data)
+			cs.gf(index, cs.rCmd.Args[index], data, expiry)
 			return
 		}
 	}
@@ -126,7 +126,7 @@ func (cs *connState) Get(keys []string, f GetFunc) (err error) {
 	return
 }
 
-func (cs *connState) Set(keys []string, vals [][]byte) (k []string, err error) {
+func (cs *connState) Set(keys []string, f SetFunc) (k []string, err error) {
 	cs.mu.Lock()
 	defer func() {
 		err, _ = recover().(error)
@@ -141,9 +141,9 @@ func (cs *connState) Set(keys []string, vals [][]byte) (k []string, err error) {
 	if err != nil {
 		panic(err)
 	}
-	for i := range keys {
-		val := vals[i]
-		err = cs.SendData(val, -1)
+	for index, key := range keys {
+		val, expiry := f(index, key)
+		err = cs.SendData(val, expiry)
 		if err != nil {
 			panic(err)
 		}
@@ -163,7 +163,7 @@ func (cs *connState) Set(keys []string, vals [][]byte) (k []string, err error) {
 	return
 }
 
-func (cs *connState) Put(keys []string, vals [][]byte) (k []string, err error) {
+func (cs *connState) Put(keys []string, f SetFunc) (k []string, err error) {
 	cs.mu.Lock()
 	defer func() {
 		err, _ = recover().(error)
@@ -178,9 +178,9 @@ func (cs *connState) Put(keys []string, vals [][]byte) (k []string, err error) {
 	if err != nil {
 		panic(err)
 	}
-	for i := range keys {
-		val := vals[i]
-		err = cs.SendData(val, -1)
+	for index, key := range keys {
+		val, expiry := f(index, key)
+		err = cs.SendData(val, expiry)
 		if err != nil {
 			panic(err)
 		}
@@ -200,7 +200,7 @@ func (cs *connState) Put(keys []string, vals [][]byte) (k []string, err error) {
 	return
 }
 
-func (cs *connState) Append(keys []string, vals [][]byte) (k []string, err error) {
+func (cs *connState) Append(keys []string, f SetFunc) (k []string, err error) {
 	cs.mu.Lock()
 	defer func() {
 		err, _ = recover().(error)
@@ -215,9 +215,9 @@ func (cs *connState) Append(keys []string, vals [][]byte) (k []string, err error
 	if err != nil {
 		panic(err)
 	}
-	for i := range keys {
-		val := vals[i]
-		err = cs.SendData(val, -1)
+	for index, key := range keys {
+		val, expiry := f(index, key)
+		err = cs.SendData(val, expiry)
 		if err != nil {
 			panic(err)
 		}

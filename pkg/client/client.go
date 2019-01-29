@@ -11,7 +11,8 @@ type Client struct {
 	cs   *connState
 }
 
-type GetFunc func(key string, val []byte)
+type GetFunc func(index int, key string, val []byte, expiry int)
+type SetFunc func(index int, key string) (val []byte, expiry int)
 
 var (
 	ConnBufferSize = 0
@@ -67,16 +68,16 @@ func (cl *Client) Get(keys []string, f GetFunc) (err error) {
 	return cl.cs.Get(keys, f)
 }
 
-func (cl *Client) Set(keys []string, vals [][]byte) (k []string, err error) {
-	return cl.cs.Set(keys, vals)
+func (cl *Client) Set(keys []string, f SetFunc) (k []string, err error) {
+	return cl.cs.Set(keys, f)
 }
 
-func (cl *Client) Put(keys []string, vals [][]byte) (k []string, err error) {
-	return cl.cs.Put(keys, vals)
+func (cl *Client) Put(keys []string, f SetFunc) (k []string, err error) {
+	return cl.cs.Put(keys, f)
 }
 
-func (cl *Client) Append(keys []string, vals [][]byte) (k []string, err error) {
-	return cl.cs.Append(keys, vals)
+func (cl *Client) Append(keys []string, f SetFunc) (k []string, err error) {
+	return cl.cs.Append(keys, f)
 }
 
 func (cl *Client) Del(keys []string) (k []string, err error) {
