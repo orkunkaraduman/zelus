@@ -9,6 +9,8 @@ import (
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
+	"runtime/debug"
+	"syscall"
 	"time"
 
 	"github.com/orkunkaraduman/zelus/pkg/protocol"
@@ -17,6 +19,7 @@ import (
 )
 
 func main() {
+	debug.SetGCPercent(5)
 	fmt.Printf("zelus-server\n\n")
 	pp := os.Getenv("PPROF")
 	if pp != "" {
@@ -68,12 +71,18 @@ func main() {
 	defer st.Close()
 	srv := server.New(st)
 
-	logger.Printf("Accepting connections from %s", addr)
+	logger.Printf("Accepting connections from %s\n", addr)
 	sigIntCh := make(chan os.Signal, 1)
 	signal.Notify(sigIntCh, os.Interrupt)
+	sigTermCh := make(chan os.Signal, 1)
+	signal.Notify(sigTermCh, syscall.SIGTERM)
 	go func() {
 		time.Sleep(250 * time.Microsecond)
-		<-sigIntCh
+		select {
+		case <-sigIntCh:
+		case <-sigTermCh:
+		}
+		logger.Printf("Shutting down...\n")
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		err := srv.Shutdown(ctx)
@@ -81,15 +90,9 @@ func main() {
 			logger.Println("Error:", err.Error())
 		}
 	}()
-	sigKillCh := make(chan os.Signal, 1)
-	signal.Notify(sigKillCh, os.Kill)
-	go func() {
-		time.Sleep(250 * time.Microsecond)
-		<-sigKillCh
-		srv.Close()
-	}()
 	err = srv.Serve(lst)
 	if err != nil {
 		panic(err)
 	}
+	logger.Printf("Finished zelus-server\n")
 }
