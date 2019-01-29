@@ -57,15 +57,25 @@ func (cs *connState) OnReadCmd(cmd protocol.Cmd) (count int) {
 		}
 		for _, key := range keys {
 			buf := cs.bf.Want(0)
-			if cs.st.Get(key, func(size int, index int, data []byte) {
+			var expiry2 int
+			if cs.st.Get(key, func(size int, index int, data []byte, expiry int) {
 				if index == 0 {
 					buf = cs.bf.Want(size)
+					expiry2 = expiry
+					if expiry2 < 0 {
+						expiry2 = -1
+					} else {
+						expiry2 -= int(time.Now().Unix())
+						if expiry2 < 0 {
+							expiry2 = 0
+						}
+					}
 				}
 				copy(buf[index:], data)
 			}) {
-				err = cs.SendData(buf)
+				err = cs.SendData(buf, expiry2)
 			} else {
-				err = cs.SendData(nil)
+				err = cs.SendData(nil, -1)
 			}
 			if err != nil {
 				panic(err)
@@ -104,22 +114,27 @@ func (cs *connState) OnReadCmd(cmd protocol.Cmd) (count int) {
 	panic(&protocol.Error{Err: ErrUnknownCommand, Cmd: cs.rCmd})
 }
 
-func (cs *connState) OnReadData(count int, index int, data []byte) {
+func (cs *connState) OnReadData(count int, index int, data []byte, expiry int) {
 	var err error
+	if expiry < 0 {
+		expiry = -1
+	} else {
+		expiry += int(time.Now().Unix())
+	}
 	if cs.rCmd.Name == "SET" || cs.rCmd.Name == "PUT" || cs.rCmd.Name == "APPEND" {
 		key := cs.rCmd.Args[index]
 		if key != "" {
 			switch cs.rCmd.Name {
 			case "SET":
-				if !cs.st.Set(key, data, 0) {
+				if !cs.st.Set(key, data, expiry) {
 					cs.rCmd.Args[index] = ""
 				}
 			case "PUT":
-				if !cs.st.Put(key, data, 0) {
+				if !cs.st.Put(key, data, expiry) {
 					cs.rCmd.Args[index] = ""
 				}
 			case "APPEND":
-				if !cs.st.Append(key, data) {
+				if !cs.st.Append(key, data, expiry) {
 					cs.rCmd.Args[index] = ""
 				}
 			}

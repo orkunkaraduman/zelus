@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/csv"
 	"io"
 	"strconv"
@@ -56,29 +57,38 @@ func (prt *Protocol) SendCmd(cmd Cmd) (err error) {
 	return
 }
 
-func (prt *Protocol) SendData(data []byte) (err error) {
+func (prt *Protocol) SendData(data []byte, expiry int) (err error) {
 	prt.wrMu.Lock()
 	_, err = prt.wr.Write([]byte("\r\n"))
 	if err != nil {
 		prt.wrMu.Unlock()
 		return
 	}
+	size := len(data)
 	if data == nil {
-		_, err = prt.wr.Write([]byte("-1\r\n"))
-		if err != nil {
-			prt.wrMu.Unlock()
-			return
-		}
+		size = -1
+	}
+	_, err = prt.wr.Write([]byte(strconv.Itoa(size)))
+	if err != nil {
 		prt.wrMu.Unlock()
 		return
 	}
-	_, err = prt.wr.Write([]byte(strconv.Itoa(len(data))))
+	_, err = prt.wr.Write([]byte(" "))
+	if err != nil {
+		prt.wrMu.Unlock()
+		return
+	}
+	_, err = prt.wr.Write([]byte(strconv.Itoa(expiry)))
 	if err != nil {
 		prt.wrMu.Unlock()
 		return
 	}
 	_, err = prt.wr.Write([]byte("\r\n"))
 	if err != nil {
+		prt.wrMu.Unlock()
+		return
+	}
+	if data == nil {
 		prt.wrMu.Unlock()
 		return
 	}
@@ -150,7 +160,7 @@ func (prt *Protocol) Receive(rc Receiver, bf *buffer.Buffer) bool {
 		}
 		line = trimCrLf(line)
 		if len(line) != 0 {
-			rc.OnReadData(count, i, line)
+			rc.OnReadData(count, i, line, -1)
 			continue
 		}
 
@@ -163,15 +173,30 @@ func (prt *Protocol) Receive(rc Receiver, bf *buffer.Buffer) bool {
 			panic(err)
 		}
 		line = trimCrLf(line)
+		var bSize, bExpiry []byte
+		idx := bytes.IndexByte(line, ' ')
+		if idx < 0 {
+			bSize = line
+		} else {
+			bSize = line[:idx]
+			bExpiry = line[idx+1:]
+		}
 		var size int
-		size, err = strconv.Atoi(string(line))
+		size, err = strconv.Atoi(string(bSize))
 		if err != nil {
 			panic(&Error{Err: ErrProtocol})
+		}
+		var expiry = int(-1)
+		if bExpiry != nil {
+			expiry, err = strconv.Atoi(string(bExpiry))
+			if err != nil {
+				panic(&Error{Err: ErrProtocol})
+			}
 		}
 
 		// read null data
 		if size < 0 {
-			rc.OnReadData(count, i, nil)
+			rc.OnReadData(count, i, nil, expiry)
 			continue
 		}
 
@@ -192,7 +217,7 @@ func (prt *Protocol) Receive(rc Receiver, bf *buffer.Buffer) bool {
 		if len(line) != 0 {
 			panic(&Error{Err: ErrProtocol})
 		}
-		rc.OnReadData(count, i, data)
+		rc.OnReadData(count, i, data, expiry)
 	}
 	err = prt.Flush()
 	if err != nil {

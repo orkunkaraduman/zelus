@@ -15,7 +15,7 @@ type Store struct {
 	done       int32
 }
 
-type GetFunc func(size int, index int, data []byte)
+type GetFunc func(size int, index int, data []byte, expiry int)
 
 type updateAction int
 
@@ -68,7 +68,7 @@ func (st *Store) disposer() {
 					break
 				}
 				nd := &sl.Nodes[j]
-				if nd.KeyHash >= 0 && nd.Expiry > 0 && nd.Expiry < time.Now().Unix() {
+				if nd.KeyHash >= 0 && nd.Expiry >= 0 && nd.Expiry < int(time.Now().Unix()) {
 					sl.DelNode(st.slotPool, st.dataPool, j)
 				}
 			}
@@ -93,7 +93,7 @@ func (st *Store) Get(key string, f GetFunc) bool {
 		return false
 	}
 	nd := &sl.Nodes[ndIdx]
-	if nd.Expiry > 0 && nd.Expiry < time.Now().Unix() {
+	if nd.Expiry >= 0 && nd.Expiry < int(time.Now().Unix()) {
 		sl.Mu.Unlock()
 		return false
 	}
@@ -111,7 +111,7 @@ func (st *Store) Get(key string, f GetFunc) bool {
 		}
 		if p == 0 {
 			d := data[n:]
-			f(valLen, valIdx, d)
+			f(valLen, valIdx, d, nd.Expiry)
 			valIdx += len(d)
 		}
 	}
@@ -119,7 +119,7 @@ func (st *Store) Get(key string, f GetFunc) bool {
 	return true
 }
 
-func (st *Store) write(key string, val []byte, ua updateAction, expiry int64) bool {
+func (st *Store) write(key string, val []byte, ua updateAction, expiry int) bool {
 	bKey := getBKey(key)
 	if bKey == nil {
 		return false
@@ -133,7 +133,7 @@ func (st *Store) write(key string, val []byte, ua updateAction, expiry int64) bo
 	foundNdIdx := sl.FindNode(keyHash, bKey)
 	if foundNdIdx >= 0 {
 		foundNd = &sl.Nodes[foundNdIdx]
-		if ua == updateActionNone && (foundNd.Expiry <= 0 || foundNd.Expiry >= time.Now().Unix()) {
+		if ua == updateActionNone && (foundNd.Expiry < 0 || foundNd.Expiry >= int(time.Now().Unix())) {
 			sl.Mu.Unlock()
 			return false
 		}
@@ -173,6 +173,9 @@ func (st *Store) write(key string, val []byte, ua updateAction, expiry int64) bo
 			return false
 		}
 		bKeyIdx = bKeyLen
+		if expiry >= 0 {
+			nd.Expiry = expiry
+		}
 	}
 	for ; bKeyIdx < bKeyLen || valIdx < valLen; index++ {
 		data := nd.Datas[index]
@@ -190,16 +193,16 @@ func (st *Store) write(key string, val []byte, ua updateAction, expiry int64) bo
 	return true
 }
 
-func (st *Store) Set(key string, val []byte, expiry int64) bool {
+func (st *Store) Set(key string, val []byte, expiry int) bool {
 	return st.write(key, val, updateActionReplace, expiry)
 }
 
-func (st *Store) Put(key string, val []byte, expiry int64) bool {
+func (st *Store) Put(key string, val []byte, expiry int) bool {
 	return st.write(key, val, updateActionNone, expiry)
 }
 
-func (st *Store) Append(key string, val []byte) bool {
-	return st.write(key, val, updateActionAppend, 0)
+func (st *Store) Append(key string, val []byte, expiry int) bool {
+	return st.write(key, val, updateActionAppend, expiry)
 }
 
 func (st *Store) Del(key string) bool {

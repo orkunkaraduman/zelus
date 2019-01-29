@@ -51,7 +51,7 @@ func (cs *connState) OnReadCmd(cmd protocol.Cmd) (count int) {
 	panic(&protocol.Error{Err: ErrUnknownCommand, Cmd: cs.rCmd})
 }
 
-func (cs *connState) OnReadData(count int, index int, data []byte) {
+func (cs *connState) OnReadData(count int, index int, data []byte, expiry int) {
 	if cs.rCmd.Name == "OK" {
 		if cs.sCmd.Name == "GET" {
 			cs.gf(cs.rCmd.Args[index], data)
@@ -143,7 +143,7 @@ func (cs *connState) Set(keys []string, vals [][]byte) (k []string, err error) {
 	}
 	for i := range keys {
 		val := vals[i]
-		err = cs.SendData(val)
+		err = cs.SendData(val, -1)
 		if err != nil {
 			panic(err)
 		}
@@ -180,7 +180,7 @@ func (cs *connState) Put(keys []string, vals [][]byte) (k []string, err error) {
 	}
 	for i := range keys {
 		val := vals[i]
-		err = cs.SendData(val)
+		err = cs.SendData(val, -1)
 		if err != nil {
 			panic(err)
 		}
@@ -217,7 +217,7 @@ func (cs *connState) Append(keys []string, vals [][]byte) (k []string, err error
 	}
 	for i := range keys {
 		val := vals[i]
-		err = cs.SendData(val)
+		err = cs.SendData(val, -1)
 		if err != nil {
 			panic(err)
 		}
