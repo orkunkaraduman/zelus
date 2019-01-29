@@ -1,20 +1,22 @@
 package malloc
 
 import (
+	"os"
 	"sync"
+	"sync/atomic"
 	"unsafe"
 )
 
 type Pool struct {
-	mu     sync.Mutex
+	mu     sync.RWMutex
 	arenas []*Arena
 	stats  PoolStats
 }
 
 type PoolStats struct {
-	TotalSize     int
-	AllocatedSize int
-	RequestedSize int
+	TotalSize     int64
+	AllocatedSize int64
+	RequestedSize int64
 }
 
 func NewPool() *Pool {
@@ -28,52 +30,84 @@ func AllocPool(totalSize int) *Pool {
 	return p
 }
 
-func (p *Pool) Grow(n int) {
+func (p *Pool) Grow(n int) int {
 	if n <= 0 {
 		panic(ErrSizeMustBePositive)
 	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	pagesize := os.Getpagesize()
+	n = ((n-1)/MinLength + 1) * MinLength
 	buf := make([]byte, n)
-	offset := 0
-	for offset < n {
-		length := 1 << uint(highbit(n-offset)-1)
-		p.arenas = append(p.arenas, NewArena(buf[offset:offset+length]))
-		offset += length
+	for i, j := 0, len(buf); i < j; i += pagesize {
+		buf[i] = 0
 	}
-	p.stats.TotalSize += n
+	p.mu.Lock()
+	m := 0
+	for n > 0 {
+		length := 1 << uint(HighBit(n)-1)
+		if length < MinLength {
+			length = MinLength
+		}
+		p.arenas = append(p.arenas, NewArena(buf[m:m+length]))
+		m += length
+		n -= length
+	}
+	p.mu.Unlock()
+	atomic.AddInt64(&p.stats.TotalSize, int64(m))
+	return m
 }
 
-func (p *Pool) Alloc(size int) []byte {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+func (p *Pool) Close() {
+	p.mu.RLock()
+	for _, a := range p.arenas {
+		a.Close()
+	}
+	p.mu.RUnlock()
+}
+
+func (p *Pool) alloc(size int, block bool) []byte {
+	p.mu.RLock()
 	var ptr []byte
 	for _, a := range p.arenas {
-		ptr = a.Alloc(size)
+		ss := a.Stats()
+		if ss.TotalSize-ss.AllocatedSize < int64(size) {
+			continue
+		}
+		ptr = a.alloc(size, block)
 		if ptr != nil {
-			p.stats.AllocatedSize += 1 << uint(highbit(size-1))
-			p.stats.RequestedSize += size
+			atomic.AddInt64(&p.stats.AllocatedSize, 1<<uint(HighBit(len(ptr)-1)))
+			atomic.AddInt64(&p.stats.RequestedSize, int64(len(ptr)))
 			break
 		}
 	}
+	p.mu.RUnlock()
 	return ptr
 }
 
+func (p *Pool) Alloc(size int) []byte {
+	return p.alloc(size, false)
+}
+
+func (p *Pool) AllocBlock(size int) []byte {
+	return p.alloc(size, true)
+}
+
 func (p *Pool) Free(ptr []byte) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	if ptr == nil {
+		return
+	}
+	p.mu.RLock()
 	for _, a := range p.arenas {
 		if uintptr(unsafe.Pointer(&ptr[0])) >= uintptr(unsafe.Pointer(&a.buf[0])) &&
 			uintptr(unsafe.Pointer(&ptr[0])) < uintptr(unsafe.Pointer(&a.buf[0]))+uintptr(len(a.buf)) {
 			a.Free(ptr)
-			p.stats.AllocatedSize -= 1 << uint(highbit(len(ptr)-1))
-			p.stats.RequestedSize -= len(ptr)
+			atomic.AddInt64(&p.stats.AllocatedSize, -int64(1<<uint(HighBit(len(ptr)-1))))
+			atomic.AddInt64(&p.stats.RequestedSize, -int64(len(ptr)))
 		}
 	}
+	p.mu.RUnlock()
 }
 
-func (p *Pool) Stats() PoolStats {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.stats
+func (p *Pool) Stats() (stats PoolStats) {
+	stats = p.stats
+	return
 }
