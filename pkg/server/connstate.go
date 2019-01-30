@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"net"
 	"strconv"
 	"time"
@@ -37,7 +38,27 @@ func (cs *connState) OnReadCmd(cmd protocol.Cmd) (count int) {
 		return
 	}
 	if cs.rCmd.Name == "PING" {
-		err = cs.SendCmd(protocol.Cmd{Name: "PONG", Args: []string{strconv.Itoa(int(time.Now().UnixNano() / 1000))}})
+		err = cs.SendCmd(protocol.Cmd{Name: "PONG", Args: []string{strconv.Itoa(int(time.Now().Unix()))}})
+		if err != nil {
+			panic(err)
+		}
+		return
+	}
+	if cs.rCmd.Name == "STATS" {
+		stats := cs.st.Stats()
+		statsStr := fmt.Sprintf(
+			"Key Count: %d\nKeyspace size: %d\nDataspace size: %d\nRequested Operation Count: %d\nSuccessful Operation Count: %d\n",
+			stats.KeyCount,
+			stats.KeyspaceSize,
+			stats.DataspaceSize,
+			stats.ReqOperCount,
+			stats.SucOperCount,
+		)
+		err = cs.SendCmd(protocol.Cmd{Name: "STATS", Args: nil})
+		if err != nil {
+			panic(err)
+		}
+		err = cs.SendData([]byte(statsStr), -1)
 		if err != nil {
 			panic(err)
 		}
