@@ -46,8 +46,7 @@ func (cs *connState) OnReadCmd(cmd protocol.Cmd) (count int) {
 	}
 	if cs.rCmd.Name == "STATS" {
 		stats := cs.st.Stats()
-		statsStr := fmt.Sprintf(
-			"Key Count: %d\nKeyspace size: %d\nDataspace size: %d\nRequested Operation Count: %d\nSuccessful Operation Count: %d\n",
+		statsStr := fmt.Sprintf(store.StoreStatsStr,
 			stats.KeyCount,
 			stats.KeyspaceSize,
 			stats.DataspaceSize,

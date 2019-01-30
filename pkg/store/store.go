@@ -24,6 +24,13 @@ type StoreStats struct {
 	SucOperCount  int64
 }
 
+const StoreStatsStr = `Key Count: %d
+Keyspace size: %d
+Dataspace size: %d
+Requested Operation Count: %d
+Successful Operation Count: %d
+`
+
 type GetFunc func(size int, index int, data []byte, expiry int)
 
 type updateAction int
