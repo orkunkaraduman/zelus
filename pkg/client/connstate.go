@@ -2,6 +2,7 @@ package client
 
 import (
 	"net"
+	"runtime"
 	"sync"
 
 	"github.com/orkunkaraduman/zelus/pkg/buffer"
@@ -63,6 +64,7 @@ func (cs *connState) OnReadData(count int, index int, data []byte, expiry int) {
 func (cs *connState) OnQuit(e error) {
 	if e != nil {
 		go cs.Close(e)
+		runtime.Gosched()
 	}
 }
 
