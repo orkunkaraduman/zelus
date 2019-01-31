@@ -31,6 +31,7 @@ Requested Operation Count: %d
 Successful Operation Count: %d
 `
 
+type ScanFunc func(key string, size int, index int, data []byte, expiry int) (cont bool)
 type GetFunc func(size int, index int, data []byte, expiry int)
 
 type updateAction int
@@ -100,6 +101,57 @@ func (st *Store) disposer() {
 func (st *Store) Stats() (stats StoreStats) {
 	stats = st.stats
 	return
+}
+
+func (st *Store) Scan(f ScanFunc) bool {
+	cont := true
+	for i := range st.slots {
+		sl := &st.slots[i]
+		sl.Mu.Lock()
+		for j := 0; j < len(sl.Nodes); j++ {
+			nd := &sl.Nodes[j]
+			if nd.KeyHash >= 0 && nd.Expiry >= 0 && nd.Expiry < int(time.Now().Unix()) {
+				bKeyLen := int(nd.Datas[0][0]) + 1
+				bKey := make([]byte, 0, bKeyLen)
+				key := ""
+				p := bKeyLen
+				valIdx, valLen := 0, nd.Size-p
+				for index := 0; valIdx < valLen; index++ {
+					data := nd.Datas[index]
+					n, r := 0, len(data)
+					if p != 0 {
+						if r > p {
+							r = p
+						}
+						m := len(bKey)
+						bKey = bKey[:m+r]
+						copy(bKey[m:], data[n:n+r])
+						n += r
+						p -= r
+					}
+					if p == 0 {
+						if key == "" {
+							key = string(bKey[1:bKey[0]])
+						}
+						d := data[n:]
+						cont = f(key, valLen, valIdx, d, nd.Expiry)
+						valIdx += len(d)
+						if !cont {
+							break
+						}
+					}
+				}
+			}
+			if !cont {
+				break
+			}
+		}
+		sl.Mu.Unlock()
+		if !cont {
+			break
+		}
+	}
+	return cont
 }
 
 func (st *Store) Get(key string, f GetFunc) bool {
