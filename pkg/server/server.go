@@ -2,9 +2,7 @@ package server
 
 import (
 	"context"
-	"log"
 	"net"
-	"os"
 
 	accepter "github.com/orkunkaraduman/go-accepter"
 	"github.com/orkunkaraduman/zelus/pkg/store"
@@ -22,10 +20,10 @@ var (
 func New(st *store.Store) (srv *Server) {
 	srv = &Server{
 		st: st,
-	}
-	srv.ac = &accepter.Accepter{
-		Handler:  accepter.HandlerFunc(srv.serve),
-		ErrorLog: log.New(os.Stdout, "", log.LstdFlags),
+		ac: &accepter.Accepter{
+			Handler:  accepter.HandlerFunc(srv.serve),
+			ErrorLog: nil, //log.New(os.Stdout, "", log.LstdFlags),
+		},
 	}
 	return
 }
@@ -57,7 +55,6 @@ func (srv *Server) serve(conn net.Conn, closeCh <-chan struct{}) {
 			unixConn.SetWriteBuffer(ConnBufferSize)
 		}
 	}
-	cs := newConnState(conn)
-	cs.st = srv.st
+	cs := newConnState(srv, conn)
 	cs.Serve(cs, closeCh)
 }

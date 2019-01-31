@@ -12,17 +12,17 @@ import (
 )
 
 type connState struct {
+	srv  *Server
 	conn net.Conn
 	*protocol.Protocol
 	bf *buffer.Buffer
 
-	st *store.Store
-
 	rCmd protocol.Cmd
 }
 
-func newConnState(conn net.Conn) (cs *connState) {
+func newConnState(srv *Server, conn net.Conn) (cs *connState) {
 	cs = &connState{
+		srv:      srv,
 		conn:     conn,
 		Protocol: protocol.New(conn, conn),
 		bf:       buffer.New(),
@@ -45,7 +45,7 @@ func (cs *connState) OnReadCmd(cmd protocol.Cmd) (count int) {
 		return
 	}
 	if cs.rCmd.Name == "STATS" {
-		stats := cs.st.Stats()
+		stats := cs.srv.st.Stats()
 		statsStr := fmt.Sprintf(store.StoreStatsStr,
 			stats.KeyCount,
 			stats.KeyspaceSize,
@@ -78,7 +78,7 @@ func (cs *connState) OnReadCmd(cmd protocol.Cmd) (count int) {
 		for _, key := range keys {
 			buf := cs.bf.Want(0)
 			var expiry2 int
-			if cs.st.Get(key, func(size int, index int, data []byte, expiry int) {
+			if cs.srv.st.Get(key, func(size int, index int, data []byte, expiry int) {
 				if index == 0 {
 					buf = cs.bf.Want(size)
 					expiry2 = expiry
@@ -120,7 +120,7 @@ func (cs *connState) OnReadCmd(cmd protocol.Cmd) (count int) {
 			if key == "" {
 				continue
 			}
-			if !cs.st.Del(key) {
+			if !cs.srv.st.Del(key) {
 				continue
 			}
 			keys = append(keys, key)
@@ -146,15 +146,15 @@ func (cs *connState) OnReadData(count int, index int, data []byte, expiry int) {
 		if key != "" {
 			switch cs.rCmd.Name {
 			case "SET":
-				if !cs.st.Set(key, data, expiry) {
+				if !cs.srv.st.Set(key, data, expiry) {
 					cs.rCmd.Args[index] = ""
 				}
 			case "PUT":
-				if !cs.st.Put(key, data, expiry) {
+				if !cs.srv.st.Put(key, data, expiry) {
 					cs.rCmd.Args[index] = ""
 				}
 			case "APPEND":
-				if !cs.st.Append(key, data, expiry) {
+				if !cs.srv.st.Append(key, data, expiry) {
 					cs.rCmd.Args[index] = ""
 				}
 			}
