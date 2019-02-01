@@ -236,10 +236,12 @@ func (st *Store) write(key string, val []byte, ua updateAction, expiry int, f Ge
 	index, offset := nd.Last()
 	switch {
 	case ua == updateActionNone || ua == updateActionReplace || foundNdIdx < 0:
-		if val == nil {
-			atomic.AddInt64(&st.stats.KeyCount, -1)
+		if foundNdIdx >= 0 {
 			atomic.AddInt64(&st.stats.KeyspaceSize, -int64(bKeyLen))
 			atomic.AddInt64(&st.stats.DataspaceSize, -int64(nd.Size-bKeyLen))
+		}
+		if val == nil {
+			atomic.AddInt64(&st.stats.KeyCount, -1)
 			sl.DelNode(st.slotPool, st.dataPool, ndIdx)
 			sl.Mu.Unlock()
 			atomic.AddInt64(&st.stats.SucOperCount, 1)
