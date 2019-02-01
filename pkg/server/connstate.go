@@ -10,7 +10,6 @@ import (
 	"github.com/orkunkaraduman/zelus/pkg/buffer"
 	"github.com/orkunkaraduman/zelus/pkg/client"
 	"github.com/orkunkaraduman/zelus/pkg/protocol"
-	"github.com/orkunkaraduman/zelus/pkg/store"
 )
 
 type connState struct {
@@ -21,6 +20,13 @@ type connState struct {
 
 	rCmd protocol.Cmd
 }
+
+const statsStr = `Key Count: %s
+Keyspace size: %s
+Dataspace size: %s
+Requested Operation Count: %s
+Successful Operation Count: %s
+`
 
 func newConnState(srv *Server, conn net.Conn) (cs *connState) {
 	cs = &connState{
@@ -48,18 +54,25 @@ func (cs *connState) OnReadCmd(cmd protocol.Cmd) (count int) {
 	}
 	if cs.rCmd.Name == "STATS" {
 		stats := cs.srv.st.Stats()
-		statsStr := fmt.Sprintf(store.StoreStatsStr,
-			stats.KeyCount,
-			stats.KeyspaceSize,
-			stats.DataspaceSize,
-			stats.ReqOperCount,
-			stats.SucOperCount,
+		args := []string{
+			strconv.FormatInt(stats.KeyCount, 10),
+			strconv.FormatInt(stats.KeyspaceSize, 10),
+			strconv.FormatInt(stats.DataspaceSize, 10),
+			strconv.FormatInt(stats.ReqOperCount, 10),
+			strconv.FormatInt(stats.SucOperCount, 10),
+		}
+		str := fmt.Sprintf(statsStr,
+			args[0],
+			args[1],
+			args[2],
+			args[3],
+			args[4],
 		)
-		err = cs.SendCmd(protocol.Cmd{Name: "STATS", Args: nil})
+		err = cs.SendCmd(protocol.Cmd{Name: "STATS", Args: args})
 		if err != nil {
 			panic(err)
 		}
-		err = cs.SendData([]byte(statsStr), -1)
+		err = cs.SendData([]byte(str), -1)
 		if err != nil {
 			panic(err)
 		}
