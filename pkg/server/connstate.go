@@ -127,6 +127,7 @@ func (cs *connState) OnReadCmd(cmd protocol.Cmd) (count int) {
 				continue
 			}
 			keys = append(keys, key)
+			cs.srv.sh.C <- keyVal{Key: key}
 		}
 		err = cs.SendCmd(protocol.Cmd{Name: "OK", Args: keys})
 		if err != nil {
@@ -255,11 +256,11 @@ func (cs *connState) OnReadData(count int, index int, data []byte, expiry int) {
 					cs.rCmd.Args[index] = ""
 				}
 			case "PUT":
-				if !cs.srv.st.Put(key, data, expiry2, nil) {
+				if !cs.srv.st.Put(key, data, expiry2, f) {
 					cs.rCmd.Args[index] = ""
 				}
 			case "APPEND":
-				if !cs.srv.st.Append(key, data, expiry2, nil) {
+				if !cs.srv.st.Append(key, data, expiry2, f) {
 					cs.rCmd.Args[index] = ""
 				}
 			}
