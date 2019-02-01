@@ -17,10 +17,11 @@ type slaveWorker struct {
 	closeCh chan struct{}
 }
 
-func newSlaveWorker(addr string) (sw *slaveWorker) {
+func newSlaveWorker(addr string, cl *client.Client) (sw *slaveWorker) {
 	sw = &slaveWorker{
 		C:       make(chan keyVal, 2*slaveHandlerQueueLen),
 		addr:    addr,
+		cl:      cl,
 		closeCh: make(chan struct{}, 1),
 	}
 	go sw.run()

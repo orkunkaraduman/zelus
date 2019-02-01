@@ -1,28 +1,28 @@
 package server
 
 import (
-	"fmt"
 	"sync"
 	"time"
+
+	"github.com/orkunkaraduman/zelus/pkg/client"
 )
 
 type slaveHandler struct {
 	C chan keyVal
 
-	mu          sync.RWMutex
-	slaves      map[string][]*slaveWorker
-	clientCount int
-	closeCh     chan struct{}
+	mu      sync.RWMutex
+	workers map[string]*slaveWorker
+	closeCh chan struct{}
 }
 
 const (
-	slaveHandlerQueueLen = 1 * 1024
+	slaveHandlerQueueLen = 16 * 1024
 )
 
 func newSlaveHandler() (sh *slaveHandler) {
 	sh = &slaveHandler{
 		C:       make(chan keyVal, slaveHandlerQueueLen),
-		slaves:  make(map[string][]*slaveWorker, 1024),
+		workers: make(map[string]*slaveWorker, 1024),
 		closeCh: make(chan struct{}, 1),
 	}
 	go sh.sender()
@@ -36,17 +36,14 @@ func (sh *slaveHandler) sender() {
 			return
 		case kv := <-sh.C:
 			sh.mu.RLock()
-			for addr, sv := range sh.slaves {
-				for _, sw := range sv {
-					select {
-					case <-sh.closeCh:
-						sh.mu.RUnlock()
-						return
-					case sw.C <- kv:
-					case <-time.After(250 * time.Millisecond):
-						fmt.Println(len(sw.C))
-						go sh.Remove(addr)
-					}
+			for addr, sw := range sh.workers {
+				select {
+				case <-sh.closeCh:
+					sh.mu.RUnlock()
+					return
+				case sw.C <- kv:
+				case <-time.After(250 * time.Millisecond):
+					go sh.Remove(addr)
 				}
 			}
 			sh.mu.RUnlock()
@@ -60,65 +57,39 @@ func (sh *slaveHandler) Close() {
 	default:
 	}
 	sh.mu.Lock()
-	for addr, sv := range sh.slaves {
-		delete(sh.slaves, addr)
-		for i := range sv {
-			sv[i].Close()
-		}
+	for addr, sw := range sh.workers {
+		delete(sh.workers, addr)
+		sw.Close()
 	}
 	sh.mu.Unlock()
 }
 
-func (sh *slaveHandler) Add(addr string) bool {
+func (sh *slaveHandler) Add(addr string) (cl *client.Client) {
 	sh.mu.Lock()
-	if _, ok := sh.slaves[addr]; ok {
+	if _, ok := sh.workers[addr]; ok {
 		sh.mu.Unlock()
-		return false
+		return
 	}
-	sv := make([]*slaveWorker, sh.clientCount)
-	sh.slaves[addr] = sv
-	for i := range sv {
-		sv[i] = newSlaveWorker(addr)
+	cl, _ = client.New("tcp", addr)
+	if cl == nil {
+		sh.mu.Unlock()
+		return
 	}
+	sh.workers[addr] = newSlaveWorker(addr, cl)
 	sh.mu.Unlock()
-	return true
+	return
 }
 
 func (sh *slaveHandler) Remove(addr string) bool {
 	sh.mu.Lock()
-	if _, ok := sh.slaves[addr]; !ok {
+	var sw *slaveWorker
+	var ok bool
+	if sw, ok = sh.workers[addr]; !ok {
 		sh.mu.Unlock()
 		return false
 	}
-	sv := sh.slaves[addr]
-	delete(sh.slaves, addr)
-	for _, sw := range sv {
-		sw.Close()
-	}
+	delete(sh.workers, addr)
+	sw.Close()
 	sh.mu.Unlock()
 	return true
-}
-
-func (sh *slaveHandler) Inc() {
-	sh.mu.Lock()
-	for addr, sv := range sh.slaves {
-		sh.slaves[addr] = append(sv, newSlaveWorker(addr))
-	}
-	sh.clientCount++
-	sh.mu.Unlock()
-}
-
-func (sh *slaveHandler) Dec() {
-	sh.mu.Lock()
-	for addr, sv := range sh.slaves {
-		l := len(sv)
-		if l <= 0 {
-			continue
-		}
-		l--
-		sv[l].Close()
-		sh.slaves[addr] = sv[:l]
-	}
-	sh.clientCount--
-	sh.mu.Unlock()
 }

@@ -139,8 +139,8 @@ func (cs *connState) OnReadCmd(cmd protocol.Cmd) (count int) {
 		addrCh := make(chan string, len(cs.rCmd.Args))
 		var wg, wg2 sync.WaitGroup
 		for _, addr := range cs.rCmd.Args {
-			cl, _ := client.New("tcp", addr)
-			if cl != nil && cs.srv.sh.Add(addr) {
+			cl := cs.srv.sh.Add(addr)
+			if cl != nil {
 				c := make(chan keyVal)
 				kvc = append(kvc, c)
 				wg.Add(1)

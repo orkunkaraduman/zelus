@@ -27,10 +27,6 @@ func New(st *store.Store) (srv *Server) {
 		sh: newSlaveHandler(),
 	}
 	srv.ac.Handler = accepter.HandlerFunc(srv.serve)
-	srv.sh.Inc()
-	srv.sh.Inc()
-	srv.sh.Inc()
-	srv.sh.Inc()
 	return
 }
 
@@ -64,7 +60,5 @@ func (srv *Server) serve(conn net.Conn, closeCh <-chan struct{}) {
 		}
 	}
 	cs := newConnState(srv, conn)
-	//srv.sh.Inc()
 	cs.Serve(cs, closeCh)
-	//srv.sh.Dec()
 }
