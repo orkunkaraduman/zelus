@@ -87,6 +87,7 @@ func (st *Store) disposer() {
 				nd := &sl.Nodes[j]
 				if nd.KeyHash >= 0 && nd.Expiry >= 0 && nd.Expiry < int(time.Now().Unix()) {
 					bKeyLen := int(nd.Datas[0][0]) + 1
+					atomic.AddInt64(&st.stats.KeyCount, -1)
 					atomic.AddInt64(&st.stats.KeyspaceSize, -int64(bKeyLen))
 					atomic.AddInt64(&st.stats.DataspaceSize, -int64(nd.Size-bKeyLen))
 					sl.DelNode(st.slotPool, st.dataPool, j)
