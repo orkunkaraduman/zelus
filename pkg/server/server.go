@@ -11,6 +11,7 @@ import (
 type Server struct {
 	st *store.Store
 	ac *accepter.Accepter
+	sh *slaveHandler
 }
 
 var (
@@ -21,10 +22,15 @@ func New(st *store.Store) (srv *Server) {
 	srv = &Server{
 		st: st,
 		ac: &accepter.Accepter{
-			Handler:  accepter.HandlerFunc(srv.serve),
 			ErrorLog: nil, //log.New(os.Stdout, "", log.LstdFlags),
 		},
+		sh: newSlaveHandler(),
 	}
+	srv.ac.Handler = accepter.HandlerFunc(srv.serve)
+	srv.sh.Inc()
+	srv.sh.Inc()
+	srv.sh.Inc()
+	srv.sh.Inc()
 	return
 }
 
@@ -37,10 +43,12 @@ func (srv *Server) TCPListenAndServe(addr string) error {
 }
 
 func (srv *Server) Shutdown(ctx context.Context) error {
+	srv.sh.Close()
 	return srv.ac.Shutdown(ctx)
 }
 
 func (srv *Server) Close() error {
+	srv.sh.Close()
 	return srv.ac.Close()
 }
 
@@ -56,5 +64,7 @@ func (srv *Server) serve(conn net.Conn, closeCh <-chan struct{}) {
 		}
 	}
 	cs := newConnState(srv, conn)
+	//srv.sh.Inc()
 	cs.Serve(cs, closeCh)
+	//srv.sh.Dec()
 }
