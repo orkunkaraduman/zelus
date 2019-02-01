@@ -148,15 +148,16 @@ func (cs *connState) OnReadCmd(cmd protocol.Cmd) (count int) {
 				go func(addr string, cl *client.Client, c chan keyVal) {
 					ok := true
 					for kv := range c {
-						k, _ := cl.Set([]string{kv.Key}, func(index int, key string) (val []byte, expiry int) {
-							return kv.Val, kv.Expiry
-						})
-						wg2.Done()
-						if len(k) <= 0 || k[0] != kv.Key {
-							cs.srv.sh.Remove(addr)
-							ok = false
-							break
+						if ok {
+							k, _ := cl.Set([]string{kv.Key}, func(index int, key string) (val []byte, expiry int) {
+								return kv.Val, kv.Expiry
+							})
+							if len(k) <= 0 || k[0] != kv.Key {
+								cs.srv.sh.Remove(addr)
+								ok = false
+							}
 						}
+						wg2.Done()
 					}
 					if ok {
 						addrCh <- addr
