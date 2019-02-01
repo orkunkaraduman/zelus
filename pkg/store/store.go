@@ -32,7 +32,7 @@ Successful Operation Count: %d
 `
 
 type ScanFunc func(key string, size int, index int, data []byte, expiry int) (cont bool)
-type GetFunc func(size int, index int, data []byte, expiry int)
+type GetFunc func(size int, index int, data []byte, expiry int) (cont bool)
 
 type updateAction int
 
@@ -110,7 +110,7 @@ func (st *Store) Scan(f ScanFunc) bool {
 		sl.Mu.Lock()
 		for j := 0; j < len(sl.Nodes); j++ {
 			nd := &sl.Nodes[j]
-			if nd.KeyHash >= 0 && nd.Expiry >= 0 && nd.Expiry < int(time.Now().Unix()) {
+			if nd.KeyHash >= 0 && (nd.Expiry < 0 || nd.Expiry >= int(time.Now().Unix())) {
 				bKeyLen := int(nd.Datas[0][0]) + 1
 				bKey := make([]byte, 0, bKeyLen)
 				key := ""
@@ -131,7 +131,7 @@ func (st *Store) Scan(f ScanFunc) bool {
 					}
 					if p == 0 {
 						if key == "" {
-							key = string(bKey[1:bKey[0]])
+							key = string(bKey[1 : 1+bKey[0]])
 						}
 						d := data[n:]
 						cont = f(key, valLen, valIdx, d, nd.Expiry)
@@ -176,6 +176,7 @@ func (st *Store) Get(key string, f GetFunc) bool {
 	}
 	p := len(bKey)
 	valIdx, valLen := 0, nd.Size-p
+	cont := true
 	for index := 0; valIdx < valLen; index++ {
 		data := nd.Datas[index]
 		n, r := 0, len(data)
@@ -188,8 +189,11 @@ func (st *Store) Get(key string, f GetFunc) bool {
 		}
 		if p == 0 {
 			d := data[n:]
-			f(valLen, valIdx, d, nd.Expiry)
+			cont = f(valLen, valIdx, d, nd.Expiry)
 			valIdx += len(d)
+			if !cont {
+				break
+			}
 		}
 	}
 	sl.Mu.Unlock()
@@ -197,7 +201,7 @@ func (st *Store) Get(key string, f GetFunc) bool {
 	return true
 }
 
-func (st *Store) write(key string, val []byte, ua updateAction, expiry int) bool {
+func (st *Store) write(key string, val []byte, ua updateAction, expiry int, f GetFunc) bool {
 	atomic.AddInt64(&st.stats.ReqOperCount, 1)
 	bKey := getBKey(key)
 	if bKey == nil {
@@ -276,21 +280,45 @@ func (st *Store) write(key string, val []byte, ua updateAction, expiry int) bool
 		}
 		offset = 0
 	}
+	if f != nil {
+		p := bKeyLen
+		valIdx, valLen := 0, nd.Size-p
+		cont := true
+		for index := 0; valIdx < valLen; index++ {
+			data := nd.Datas[index]
+			n, r := 0, len(data)
+			if p != 0 {
+				if r > p {
+					r = p
+				}
+				n += r
+				p -= r
+			}
+			if p == 0 {
+				d := data[n:]
+				cont = f(valLen, valIdx, d, nd.Expiry)
+				valIdx += len(d)
+				if !cont {
+					break
+				}
+			}
+		}
+	}
 	sl.Mu.Unlock()
 	atomic.AddInt64(&st.stats.SucOperCount, 1)
 	return true
 }
 
-func (st *Store) Set(key string, val []byte, expiry int) bool {
-	return st.write(key, val, updateActionReplace, expiry)
+func (st *Store) Set(key string, val []byte, expiry int, f GetFunc) bool {
+	return st.write(key, val, updateActionReplace, expiry, f)
 }
 
-func (st *Store) Put(key string, val []byte, expiry int) bool {
-	return st.write(key, val, updateActionNone, expiry)
+func (st *Store) Put(key string, val []byte, expiry int, f GetFunc) bool {
+	return st.write(key, val, updateActionNone, expiry, f)
 }
 
-func (st *Store) Append(key string, val []byte, expiry int) bool {
-	return st.write(key, val, updateActionAppend, expiry)
+func (st *Store) Append(key string, val []byte, expiry int, f GetFunc) bool {
+	return st.write(key, val, updateActionAppend, expiry, f)
 }
 
 func (st *Store) Del(key string) bool {
