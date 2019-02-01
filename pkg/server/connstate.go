@@ -217,7 +217,7 @@ func (cs *connState) OnReadCmd(cmd protocol.Cmd) (count int) {
 
 func (cs *connState) OnReadData(count int, index int, data []byte, expiry int) {
 	var err error
-	var expiry2 int
+	expiry2 := expiry
 	if expiry < 0 {
 		expiry2 = -1
 	} else {
