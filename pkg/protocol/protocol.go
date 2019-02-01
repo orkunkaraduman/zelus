@@ -243,12 +243,12 @@ func (prt *Protocol) Receive(rc Receiver, bf *buffer.Buffer) bool {
 }
 
 func (prt *Protocol) Serve(rc Receiver, closeCh <-chan struct{}) {
-	bf := buffer.New()
 	defer func() {
-		bf.Close()
 		e, _ := recover().(error)
 		rc.OnQuit(e)
 	}()
+	bf := buffer.New()
+	defer bf.Close()
 	for {
 		closed := false
 		select {
