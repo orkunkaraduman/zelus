@@ -69,6 +69,10 @@ func (cl *Client) Close() (err error) {
 	return
 }
 
+func (cl *Client) IsClosed() bool {
+	return cl.cs.IsClosed()
+}
+
 func (cl *Client) Get(keys []string, f GetFunc) (err error) {
 	return cl.cs.Get(keys, f)
 }
