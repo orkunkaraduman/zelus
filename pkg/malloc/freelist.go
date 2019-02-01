@@ -6,11 +6,11 @@ import (
 )
 
 type freeList struct {
-	size       int
-	list       []uint8
-	queue      []chan int
-	dispatchCh chan struct{}
-	done       int32
+	size         int
+	list         []uint8
+	queue        []chan int
+	dispatcherCh chan struct{}
+	done         int32
 }
 
 const (
@@ -21,10 +21,10 @@ const (
 func newFreeList(size int) *freeList {
 	count := (size-1)/MinLength + 1
 	f := &freeList{
-		size:       size,
-		list:       make([]uint8, count, count+4),
-		queue:      make([]chan int, MaxHigh-MinHigh+1),
-		dispatchCh: make(chan struct{}),
+		size:         size,
+		list:         make([]uint8, count, count+4),
+		queue:        make([]chan int, MaxHigh-MinHigh+1),
+		dispatcherCh: make(chan struct{}),
 	}
 	for i := range f.list {
 		f.list[i] = 0xff
@@ -32,7 +32,7 @@ func newFreeList(size int) *freeList {
 	for i := range f.queue {
 		f.queue[i] = make(chan int, 4*1024)
 	}
-	go f.dispatch()
+	go f.dispatcher()
 	return f
 }
 
@@ -56,9 +56,9 @@ func (f *freeList) filledSize() int {
 	return r
 }
 
-func (f *freeList) dispatch() {
+func (f *freeList) dispatcher() {
 	for f.done == 0 {
-		<-f.dispatchCh
+		<-f.dispatcherCh
 		offset, length, high := 0, 1<<MinHigh, MinHigh
 		for f.done == 0 && offset < f.size {
 			high = f.get(offset)
@@ -101,7 +101,7 @@ func (f *freeList) setFree(offset int, high int) {
 	case f.queue[v-MinHigh] <- offset:
 	default:
 		select {
-		case f.dispatchCh <- struct{}{}:
+		case f.dispatcherCh <- struct{}{}:
 		default:
 		}
 	}
