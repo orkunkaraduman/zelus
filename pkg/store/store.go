@@ -222,12 +222,12 @@ func (st *Store) write(key string, val []byte, ua updateAction, expiry int, f Ge
 		}
 		ndIdx = foundNdIdx
 	} else {
-		atomic.AddInt64(&st.stats.KeyCount, 1)
 		ndIdx = sl.NewNode(st.slotPool)
-	}
-	if ndIdx < 0 {
-		sl.Mu.Unlock()
-		return false
+		if ndIdx < 0 {
+			sl.Mu.Unlock()
+			return false
+		}
+		atomic.AddInt64(&st.stats.KeyCount, 1)
 	}
 	bKeyIdx, bKeyLen := 0, len(bKey)
 	valIdx, valLen := 0, len(val)
@@ -326,6 +326,7 @@ func (st *Store) Append(key string, val []byte, expiry int, f GetFunc) bool {
 func (st *Store) Del(key string) bool {
 	atomic.AddInt64(&st.stats.ReqOperCount, 1)
 	bKey := getBKey(key)
+	bKeyLen := len(bKey)
 	if bKey == nil {
 		return false
 	}
@@ -340,8 +341,8 @@ func (st *Store) Del(key string) bool {
 	}
 	nd := &sl.Nodes[ndIdx]
 	atomic.AddInt64(&st.stats.KeyCount, -1)
-	atomic.AddInt64(&st.stats.KeyspaceSize, -int64(len(bKey)))
-	atomic.AddInt64(&st.stats.DataspaceSize, -int64(nd.Size-len(bKey)))
+	atomic.AddInt64(&st.stats.KeyspaceSize, -int64(bKeyLen))
+	atomic.AddInt64(&st.stats.DataspaceSize, -int64(nd.Size-bKeyLen))
 	sl.DelNode(st.slotPool, st.dataPool, ndIdx)
 	sl.Mu.Unlock()
 	atomic.AddInt64(&st.stats.SucOperCount, 1)
