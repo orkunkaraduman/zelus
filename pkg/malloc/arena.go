@@ -2,7 +2,6 @@ package malloc
 
 import (
 	"os"
-	"runtime"
 	"sync"
 	"sync/atomic"
 	"unsafe"
@@ -49,7 +48,6 @@ func NewArena(buf []byte) *Arena {
 	}
 	a.fl.setFree(0, h)
 	a.stats.TotalSize = int64(totalSize)
-	runtime.Gosched()
 	return a
 }
 
@@ -75,7 +73,7 @@ func AllocArena(totalSize int) *Arena {
 func (a *Arena) Close() {
 	atomic.StoreInt32(&a.fl.done, 1)
 	select {
-	case a.fl.dispatchCh <- struct{}{}:
+	case a.fl.dispatcherCh <- struct{}{}:
 	default:
 	}
 }

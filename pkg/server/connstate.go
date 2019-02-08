@@ -1,27 +1,36 @@
 package server
 
 import (
+	"fmt"
 	"net"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/orkunkaraduman/zelus/pkg/buffer"
+	"github.com/orkunkaraduman/zelus/pkg/client"
 	"github.com/orkunkaraduman/zelus/pkg/protocol"
-	"github.com/orkunkaraduman/zelus/pkg/store"
 )
 
 type connState struct {
+	srv  *Server
 	conn net.Conn
 	*protocol.Protocol
 	bf *buffer.Buffer
 
-	st *store.Store
-
 	rCmd protocol.Cmd
 }
 
-func newConnState(conn net.Conn) (cs *connState) {
+const statsStr = `Key Count: %s
+Keyspace size: %s
+Dataspace size: %s
+Requested Operation Count: %s
+Successful Operation Count: %s
+`
+
+func newConnState(srv *Server, conn net.Conn) (cs *connState) {
 	cs = &connState{
+		srv:      srv,
 		conn:     conn,
 		Protocol: protocol.New(conn, conn),
 		bf:       buffer.New(),
@@ -37,7 +46,33 @@ func (cs *connState) OnReadCmd(cmd protocol.Cmd) (count int) {
 		return
 	}
 	if cs.rCmd.Name == "PING" {
-		err = cs.SendCmd(protocol.Cmd{Name: "PONG", Args: []string{strconv.Itoa(int(time.Now().UnixNano() / 1000))}})
+		err = cs.SendCmd(protocol.Cmd{Name: "PONG", Args: []string{strconv.Itoa(int(time.Now().Unix()))}})
+		if err != nil {
+			panic(err)
+		}
+		return
+	}
+	if cs.rCmd.Name == "STATS" {
+		stats := cs.srv.st.Stats()
+		args := []string{
+			strconv.FormatInt(stats.KeyCount, 10),
+			strconv.FormatInt(stats.KeyspaceSize, 10),
+			strconv.FormatInt(stats.DataspaceSize, 10),
+			strconv.FormatInt(stats.ReqOperCount, 10),
+			strconv.FormatInt(stats.SucOperCount, 10),
+		}
+		str := fmt.Sprintf(statsStr,
+			args[0],
+			args[1],
+			args[2],
+			args[3],
+			args[4],
+		)
+		err = cs.SendCmd(protocol.Cmd{Name: "STATS", Args: args})
+		if err != nil {
+			panic(err)
+		}
+		err = cs.SendData([]byte(str), -1)
 		if err != nil {
 			panic(err)
 		}
@@ -58,7 +93,7 @@ func (cs *connState) OnReadCmd(cmd protocol.Cmd) (count int) {
 		for _, key := range keys {
 			buf := cs.bf.Want(0)
 			var expiry2 int
-			if cs.st.Get(key, func(size int, index int, data []byte, expiry int) {
+			if cs.srv.st.Get(key, func(size int, index int, data []byte, expiry int) (cont bool) {
 				if index == 0 {
 					buf = cs.bf.Want(size)
 					expiry2 = expiry
@@ -72,6 +107,7 @@ func (cs *connState) OnReadCmd(cmd protocol.Cmd) (count int) {
 					}
 				}
 				copy(buf[index:], data)
+				return
 			}) {
 				err = cs.SendData(buf, expiry2)
 			} else {
@@ -100,12 +136,91 @@ func (cs *connState) OnReadCmd(cmd protocol.Cmd) (count int) {
 			if key == "" {
 				continue
 			}
-			if !cs.st.Del(key) {
+			if !cs.srv.st.Del(key) {
 				continue
 			}
 			keys = append(keys, key)
+			cs.srv.sh.C <- keyVal{Key: key}
 		}
 		err = cs.SendCmd(protocol.Cmd{Name: "OK", Args: keys})
+		if err != nil {
+			panic(err)
+		}
+		return
+	}
+	if cs.rCmd.Name == "SLAVE" {
+		kvc := make([]chan keyVal, 0, len(cs.rCmd.Args))
+		addrCh := make(chan string, len(cs.rCmd.Args))
+		var wg, wg2 sync.WaitGroup
+		for _, addr := range cs.rCmd.Args {
+			cl := cs.srv.sh.Add(addr)
+			if cl != nil {
+				c := make(chan keyVal)
+				kvc = append(kvc, c)
+				wg.Add(1)
+				go func(addr string, cl *client.Client, c chan keyVal) {
+					ok := true
+					for kv := range c {
+						if ok {
+							k, _ := cl.Set([]string{kv.Key}, func(index int, key string) (val []byte, expiry int) {
+								return kv.Val, kv.Expiry
+							})
+							if len(k) <= 0 || k[0] != kv.Key {
+								cs.srv.sh.Remove(addr)
+								ok = false
+							}
+						}
+						wg2.Done()
+					}
+					if ok {
+						addrCh <- addr
+					}
+					wg.Done()
+				}(addr, cl, c)
+			}
+		}
+		go func() {
+			wg.Wait()
+			close(addrCh)
+		}()
+		bf := buffer.New()
+		val := bf.Want(0)
+		cs.srv.st.Scan(func(key string, size int, index int, data []byte, expiry int) (cont bool) {
+			if index == 0 {
+				val = bf.Want(size)
+			}
+			n := copy(val[index:], data)
+			if index+n >= size {
+				kv := keyVal{
+					Key:    key,
+					Val:    val,
+					Expiry: expiry,
+				}
+				if kv.Expiry < 0 {
+					kv.Expiry = -1
+				} else {
+					kv.Expiry -= int(time.Now().Unix())
+					if kv.Expiry < 0 {
+						kv.Expiry = 0
+					}
+				}
+				for _, c := range kvc {
+					wg2.Add(1)
+					c <- kv
+				}
+				wg2.Wait()
+			}
+			return true
+		})
+		for _, c := range kvc {
+			close(c)
+		}
+		addrs := make([]string, 0, len(cs.rCmd.Args))
+		for addr := range addrCh {
+			addrs = append(addrs, addr)
+		}
+		bf.Close()
+		err = cs.SendCmd(protocol.Cmd{Name: "OK", Args: addrs})
 		if err != nil {
 			panic(err)
 		}
@@ -116,25 +231,50 @@ func (cs *connState) OnReadCmd(cmd protocol.Cmd) (count int) {
 
 func (cs *connState) OnReadData(count int, index int, data []byte, expiry int) {
 	var err error
+	expiry2 := expiry
 	if expiry < 0 {
-		expiry = -1
+		expiry2 = -1
 	} else {
-		expiry += int(time.Now().Unix())
+		expiry2 += int(time.Now().Unix())
 	}
 	if cs.rCmd.Name == "SET" || cs.rCmd.Name == "PUT" || cs.rCmd.Name == "APPEND" {
 		key := cs.rCmd.Args[index]
 		if key != "" {
+			val := []byte(nil)
+			f := func(size int, index int, data []byte, expiry int) (cont bool) {
+				if index == 0 {
+					val = make([]byte, size)
+				}
+				n := copy(val[index:], data)
+				if index+n >= size {
+					kv := keyVal{
+						Key:    key,
+						Val:    val,
+						Expiry: expiry,
+					}
+					if kv.Expiry < 0 {
+						kv.Expiry = -1
+					} else {
+						kv.Expiry -= int(time.Now().Unix())
+						if kv.Expiry < 0 {
+							kv.Expiry = 0
+						}
+					}
+					cs.srv.sh.C <- kv
+				}
+				return true
+			}
 			switch cs.rCmd.Name {
 			case "SET":
-				if !cs.st.Set(key, data, expiry) {
+				if !cs.srv.st.Set(key, data, expiry2, f) {
 					cs.rCmd.Args[index] = ""
 				}
 			case "PUT":
-				if !cs.st.Put(key, data, expiry) {
+				if !cs.srv.st.Put(key, data, expiry2, f) {
 					cs.rCmd.Args[index] = ""
 				}
 			case "APPEND":
-				if !cs.st.Append(key, data, expiry) {
+				if !cs.srv.st.Append(key, data, expiry2, f) {
 					cs.rCmd.Args[index] = ""
 				}
 			}

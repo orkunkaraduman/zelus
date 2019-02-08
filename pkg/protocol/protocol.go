@@ -57,6 +57,22 @@ func (prt *Protocol) SendCmd(cmd Cmd) (err error) {
 	return
 }
 
+func (prt *Protocol) SendLine(line []byte) (err error) {
+	prt.wrMu.Lock()
+	_, err = prt.wr.Write(line)
+	if err != nil {
+		prt.wrMu.Unlock()
+		return
+	}
+	_, err = prt.wr.Write([]byte("\r\n"))
+	if err != nil {
+		prt.wrMu.Unlock()
+		return
+	}
+	prt.wrMu.Unlock()
+	return
+}
+
 func (prt *Protocol) SendData(data []byte, expiry int) (err error) {
 	prt.wrMu.Lock()
 	_, err = prt.wr.Write([]byte("\r\n"))
@@ -227,12 +243,12 @@ func (prt *Protocol) Receive(rc Receiver, bf *buffer.Buffer) bool {
 }
 
 func (prt *Protocol) Serve(rc Receiver, closeCh <-chan struct{}) {
-	bf := buffer.New()
 	defer func() {
-		bf.Close()
 		e, _ := recover().(error)
 		rc.OnQuit(e)
 	}()
+	bf := buffer.New()
+	defer bf.Close()
 	for {
 		closed := false
 		select {

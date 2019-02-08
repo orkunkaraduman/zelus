@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"net"
+	"runtime"
 	"time"
 )
 
@@ -43,6 +44,7 @@ func New(network, address string) (cl *Client, err error) {
 
 func (cl *Client) Shutdown(ctx context.Context) (err error) {
 	go cl.cs.Close(nil)
+	runtime.Gosched()
 	for {
 		select {
 		case <-time.After(5 * time.Millisecond):
@@ -53,6 +55,9 @@ func (cl *Client) Shutdown(ctx context.Context) (err error) {
 		case <-ctx.Done():
 			cl.conn.Close()
 			err = ctx.Err()
+			for !cl.cs.IsClosed() {
+				time.Sleep(5 * time.Millisecond)
+			}
 			return
 		}
 	}
@@ -62,6 +67,10 @@ func (cl *Client) Close() (err error) {
 	err = cl.conn.Close()
 	cl.cs.Close(nil)
 	return
+}
+
+func (cl *Client) IsClosed() bool {
+	return cl.cs.IsClosed()
 }
 
 func (cl *Client) Get(keys []string, f GetFunc) (err error) {
