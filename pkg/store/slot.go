@@ -13,6 +13,9 @@ type slot struct {
 	Nodes []node
 }
 
+var zeroSlot slot
+var sizeOfSlot = int(unsafe.Sizeof(zeroSlot))
+
 func (sl *slot) FindNode(keyHash int, bKey []byte) int {
 	bKeyLen := len(bKey)
 	if bKeyLen <= 0 {
@@ -48,8 +51,6 @@ func (sl *slot) NewNode(slotPool *malloc.Pool) int {
 			return i
 		}
 	}
-	var zeroNode node
-	sizeOfNode := int(unsafe.Sizeof(zeroNode))
 	idx := len(sl.Nodes)
 	ptr := slotPool.AllocBlock((idx + 1) * sizeOfNode)
 	if ptr == nil {
@@ -73,14 +74,28 @@ func (sl *slot) NewNode(slotPool *malloc.Pool) int {
 	return idx
 }
 
-func (sl *slot) DelNode(slotPool, dataPool *malloc.Pool, idx int) {
+func (sl *slot) DelNode(idx int, slotPool *malloc.Pool) {
+	nd := &sl.Nodes[idx]
+	nd.KeyHash = -1
+	nd.Datas = nil
+	nd.Size = 0
+	nd.Expiry = -1
+	for i := range sl.Nodes {
+		if sl.Nodes[i].KeyHash >= 0 {
+			return
+		}
+	}
+	if sl.Nodes != nil {
+		slotPool.Free((*[^uint32(0) >> 1]byte)(unsafe.Pointer(&sl.Nodes[0]))[:len(sl.Nodes)*sizeOfNode][:])
+		sl.Nodes = nil
+	}
+}
+
+func (sl *slot) FreeNode(idx int, slotPool, dataPool *malloc.Pool) {
 	nd := &sl.Nodes[idx]
 	nd.KeyHash = -1
 	nd.Free(slotPool, dataPool)
-	nd.Size = 0
 	nd.Expiry = -1
-	var zeroNode node
-	sizeOfNode := int(unsafe.Sizeof(zeroNode))
 	for i := range sl.Nodes {
 		if sl.Nodes[i].KeyHash >= 0 {
 			return
@@ -98,6 +113,9 @@ type node struct {
 	Size    int
 	Expiry  int
 }
+
+var zeroNode node
+var sizeOfNode = int(unsafe.Sizeof(zeroNode))
 
 func (nd *node) Alloc(slotPool, dataPool *malloc.Pool, size int) bool {
 	sz := size
@@ -201,6 +219,7 @@ func (nd *node) Free(slotPool, dataPool *malloc.Pool) {
 		slotPool.Free((*[^uint32(0) >> 1]byte)(unsafe.Pointer(&nd.Datas[0]))[:len(nd.Datas)*sizeOfData][:])
 	}
 	nd.Datas = nil
+	nd.Size = 0
 }
 
 func (nd *node) Last() (index, offset int) {
