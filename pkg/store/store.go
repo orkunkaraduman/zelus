@@ -11,7 +11,6 @@ import (
 type Store struct {
 	buckets          [][]slot
 	bucketsMu        sync.RWMutex
-	slotCount        int
 	lhN              int
 	lhL              int
 	lhS              int
@@ -28,6 +27,7 @@ type StoreStats struct {
 	DataspaceSize int64
 	ReqOperCount  int64
 	SucOperCount  int64
+	SlotCount     int64
 }
 
 type ScanFunc func(key string, size int, index int, data []byte, expiry int) (cont bool)
@@ -55,7 +55,7 @@ func New(bucketSize int, memorySize int) (st *Store) {
 		disposerClosedCh: make(chan struct{}),
 	}
 	st.buckets = append(st.buckets, make([]slot, st.lhN))
-	st.slotCount += st.lhN
+	st.stats.SlotCount += int64(st.lhN)
 	go st.disposer()
 	return
 }
@@ -113,7 +113,11 @@ func (st *Store) disposer() {
 }
 
 func (st *Store) getSlot(h int) *slot {
-	_, bucketNo, bucketOffset := lhSlotLocation(st.lhN, st.lhL, st.lhS, h)
+	return st.getSlotNLS(st.lhN, st.lhL, st.lhS, h)
+}
+
+func (st *Store) getSlotNLS(N, L, S int, h int) *slot {
+	_, bucketNo, bucketOffset := lhSlotLocation(N, L, S, h)
 	return &st.buckets[bucketNo][bucketOffset]
 }
 
@@ -122,20 +126,21 @@ func (st *Store) expand(n int) {
 	for m := 0; m < n; m++ {
 		L, S := st.lhL, st.lhS
 		L1 := L + 1
+
 		if S == 0 {
 			st.buckets = append(st.buckets, make([]slot, 0, st.lhN*(1<<uint(L))))
 		}
-		idx := len(st.buckets[L1])
-		st.buckets[L1] = st.buckets[L1][:idx+1]
-		sl1 := st.getSlot(S)
-		sl2 := &st.buckets[L1][idx]
+		st.buckets[L1] = st.buckets[L1][:len(st.buckets[L1])+1]
 
 		st.lhS++
 		if st.lhS >= st.lhN*(1<<uint(st.lhL)) {
 			st.lhL++
 			st.lhS = 0
 		}
-		st.slotCount++
+		atomic.AddInt64(&st.stats.SlotCount, 1)
+
+		sl1 := st.getSlotNLS(st.lhN, L, S, S)
+		sl2 := st.getSlot(st.lhN*(1<<uint(st.lhL)) + st.lhS - 1)
 
 		for ndIdx1 := 0; ndIdx1 < len(sl1.Nodes); ndIdx1++ {
 			nd1 := &sl1.Nodes[ndIdx1]
@@ -151,6 +156,55 @@ func (st *Store) expand(n int) {
 			nd2 := &sl2.Nodes[ndIdx2]
 			*nd2 = *nd1
 			sl1.DelNode(ndIdx1, st.slotPool)
+		}
+	}
+	st.bucketsMu.Unlock()
+}
+
+func (st *Store) shrink(n int) {
+	m := int(st.stats.SlotCount) - st.lhN
+	if n > m {
+		n = m
+	}
+	st.bucketsMu.Lock()
+	for m := 0; m < n; m++ {
+		L, S := st.lhL, st.lhS
+		L1 := L + 1
+
+		st.lhS--
+		if st.lhS < 0 {
+			st.lhL--
+			st.lhS = st.lhN*(1<<uint(st.lhL)) - 1
+		}
+		atomic.AddInt64(&st.stats.SlotCount, -1)
+
+		sl1 := st.getSlotNLS(st.lhN, L, S, st.lhN*(1<<uint(L))+S-1)
+		sl2 := st.getSlot(st.lhS)
+
+		for ndIdx1 := 0; ndIdx1 < len(sl1.Nodes); ndIdx1++ {
+			nd1 := &sl1.Nodes[ndIdx1]
+			if nd1.KeyHash < 0 {
+				continue
+			}
+			offset1, _, _ := lhSlotLocation(st.lhN, L, S, nd1.KeyHash)
+			offset2, _, _ := lhSlotLocation(st.lhN, st.lhL, st.lhS, nd1.KeyHash)
+			if offset1 == offset2 {
+				panicConsistency()
+			}
+			ndIdx2 := sl2.NewNode(st.slotPool)
+			nd2 := &sl2.Nodes[ndIdx2]
+			*nd2 = *nd1
+			sl1.DelNode(ndIdx1, st.slotPool)
+		}
+		if len(sl1.Nodes) != 0 {
+			panicConsistency()
+		}
+
+		if S == 0 {
+			st.buckets[L] = st.buckets[L][:len(st.buckets[L])-1]
+			st.buckets = st.buckets[:len(st.buckets)-1]
+		} else {
+			st.buckets[L1] = st.buckets[L1][:len(st.buckets[L1])-1]
 		}
 	}
 	st.bucketsMu.Unlock()
@@ -377,8 +431,12 @@ func (st *Store) write(key string, val []byte, ua updateAction, expiry int, f Ge
 	sl.Mu.Unlock()
 
 	kc := int(st.stats.KeyCount)
-	if kc > st.slotCount {
-		go st.expand(kc - st.slotCount)
+	sc := int(st.stats.SlotCount)
+	if kc > sc {
+		go st.expand(kc - sc)
+	}
+	if key == "shrink" {
+		go st.shrink(1)
 	}
 
 	st.bucketsMu.RUnlock()
