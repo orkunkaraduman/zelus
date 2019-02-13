@@ -2,7 +2,9 @@ package server
 
 import (
 	"context"
+	"log"
 	"net"
+	"os"
 
 	accepter "github.com/orkunkaraduman/go-accepter"
 	"github.com/orkunkaraduman/zelus/pkg/store"
@@ -22,7 +24,7 @@ func New(st *store.Store) (srv *Server) {
 	srv = &Server{
 		st: st,
 		ac: &accepter.Accepter{
-			ErrorLog: nil, //log.New(os.Stdout, "", log.LstdFlags),
+			ErrorLog: log.New(os.Stderr, "", log.LstdFlags),
 		},
 		sh: newSlaveHandler(),
 	}

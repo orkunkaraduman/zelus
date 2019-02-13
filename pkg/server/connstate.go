@@ -26,6 +26,7 @@ Keyspace size: %s
 Dataspace size: %s
 Requested Operation Count: %s
 Successful Operation Count: %s
+Slot Count: %s
 `
 
 func newConnState(srv *Server, conn net.Conn) (cs *connState) {
@@ -60,6 +61,7 @@ func (cs *connState) OnReadCmd(cmd protocol.Cmd) (count int) {
 			strconv.FormatInt(stats.DataspaceSize, 10),
 			strconv.FormatInt(stats.ReqOperCount, 10),
 			strconv.FormatInt(stats.SucOperCount, 10),
+			strconv.FormatInt(stats.SlotCount, 10),
 		}
 		str := fmt.Sprintf(statsStr,
 			args[0],
@@ -67,6 +69,7 @@ func (cs *connState) OnReadCmd(cmd protocol.Cmd) (count int) {
 			args[2],
 			args[3],
 			args[4],
+			args[5],
 		)
 		err = cs.SendCmd(protocol.Cmd{Name: "STATS", Args: args})
 		if err != nil {
