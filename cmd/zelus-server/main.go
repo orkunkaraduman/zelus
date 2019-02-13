@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime/debug"
+	"sync"
 	"syscall"
 	"time"
 
@@ -65,10 +66,7 @@ func main() {
 
 	logger.Printf("Allocating %dMiB of memory...\n", ca.Capacity)
 	size := int(ca.Capacity) * 1024 * 1024
-	//count := size / (4 * malloc.MinLength)
-	count := size / 4096
-	st := store.New(count, size)
-	defer st.Close()
+	st := store.New(64*1024, 4, size)
 	srv := server.New(st)
 
 	logger.Printf("Accepting connections from %s\n", addr)
@@ -76,6 +74,8 @@ func main() {
 	signal.Notify(sigIntCh, os.Interrupt)
 	sigTermCh := make(chan os.Signal, 1)
 	signal.Notify(sigTermCh, syscall.SIGTERM)
+	var wg sync.WaitGroup
+	wg.Add(1)
 	go func() {
 		time.Sleep(250 * time.Microsecond)
 		select {
@@ -89,10 +89,13 @@ func main() {
 		if err != nil {
 			logger.Println("Error:", err.Error())
 		}
+		wg.Done()
 	}()
 	err = srv.Serve(lst)
 	if err != nil {
 		panic(err)
 	}
+	wg.Wait()
+	st.Close()
 	logger.Printf("Finished zelus-server\n")
 }
