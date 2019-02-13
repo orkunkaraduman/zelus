@@ -14,6 +14,8 @@ type Store struct {
 	lhN              int
 	lhL              int
 	lhS              int
+	loadFactor       int
+	lfLastKeyCount   int64
 	slotPool         *malloc.Pool
 	dataPool         *malloc.Pool
 	disposerCloseCh  chan struct{}
@@ -41,7 +43,7 @@ const (
 	updateActionAppend
 )
 
-func New(bucketSize int, memorySize int) (st *Store) {
+func New(bucketSize int, loadFactor int, memorySize int) (st *Store) {
 	if bucketSize <= 0 || memorySize <= 0 {
 		return
 	}
@@ -49,6 +51,7 @@ func New(bucketSize int, memorySize int) (st *Store) {
 	st = &Store{
 		buckets:          make([][]slot, 0, 64),
 		lhN:              bucketSize,
+		loadFactor:       loadFactor,
 		slotPool:         p,
 		dataPool:         p,
 		disposerCloseCh:  make(chan struct{}, 1),
@@ -122,7 +125,6 @@ func (st *Store) getSlotNLS(N, L, S int, h int) *slot {
 }
 
 func (st *Store) expand(n int) {
-	st.bucketsMu.Lock()
 	for m := 0; m < n; m++ {
 		L, S := st.lhL, st.lhS
 		L1 := L + 1
@@ -153,28 +155,29 @@ func (st *Store) expand(n int) {
 				continue
 			}
 			ndIdx2 := sl2.NewNode(st.slotPool)
+			if ndIdx2 < 0 {
+				panicConsistency()
+			}
 			nd2 := &sl2.Nodes[ndIdx2]
 			*nd2 = *nd1
 			sl1.DelNode(ndIdx1, st.slotPool)
 		}
 	}
-	st.bucketsMu.Unlock()
 }
 
 func (st *Store) shrink(n int) {
-	m := int(st.stats.SlotCount) - st.lhN
+	m := int(st.stats.SlotCount - int64(st.lhN))
 	if n > m {
 		n = m
 	}
-	st.bucketsMu.Lock()
 	for m := 0; m < n; m++ {
 		L, S := st.lhL, st.lhS
-		L1 := L + 1
 
-		st.lhS--
-		if st.lhS < 0 {
+		if st.lhS == 0 {
 			st.lhL--
 			st.lhS = st.lhN*(1<<uint(st.lhL)) - 1
+		} else {
+			st.lhS--
 		}
 		atomic.AddInt64(&st.stats.SlotCount, -1)
 
@@ -192,6 +195,9 @@ func (st *Store) shrink(n int) {
 				panicConsistency()
 			}
 			ndIdx2 := sl2.NewNode(st.slotPool)
+			if ndIdx2 < 0 {
+				panicConsistency()
+			}
 			nd2 := &sl2.Nodes[ndIdx2]
 			*nd2 = *nd1
 			sl1.DelNode(ndIdx1, st.slotPool)
@@ -200,11 +206,35 @@ func (st *Store) shrink(n int) {
 			panicConsistency()
 		}
 
-		if S == 0 {
-			st.buckets[L] = st.buckets[L][:len(st.buckets[L])-1]
-			st.buckets = st.buckets[:len(st.buckets)-1]
-		} else {
-			st.buckets[L1] = st.buckets[L1][:len(st.buckets[L1])-1]
+		L1 := st.lhL + 1
+		st.buckets[L1] = st.buckets[L1][:len(st.buckets[L1])-1]
+		if st.lhS == 0 {
+			idx := len(st.buckets) - 1
+			st.buckets[idx] = nil
+			st.buckets = st.buckets[:idx]
+		}
+	}
+}
+
+func (st *Store) fixLoadFactor() {
+	if st.loadFactor <= 0 {
+		return
+	}
+	lf := int(st.stats.KeyCount / st.stats.SlotCount)
+	if lf == st.loadFactor {
+		return
+	}
+	st.bucketsMu.Lock()
+	lf = int(st.stats.KeyCount / st.stats.SlotCount)
+	if lf != st.loadFactor && st.stats.KeyCount != st.lfLastKeyCount {
+		n := int(st.stats.KeyCount/int64(st.loadFactor) - st.stats.SlotCount)
+		if n > 0 {
+			st.expand(n)
+			st.lfLastKeyCount = st.stats.KeyCount
+		}
+		if n < 0 {
+			st.shrink(-n)
+			st.lfLastKeyCount = st.stats.KeyCount
 		}
 	}
 	st.bucketsMu.Unlock()
@@ -283,11 +313,13 @@ func (st *Store) Get(key string, f GetFunc) bool {
 	ndIdx := sl.FindNode(keyHash, bKey)
 	if ndIdx < 0 {
 		sl.Mu.Unlock()
+		st.bucketsMu.RUnlock()
 		return false
 	}
 	nd := &sl.Nodes[ndIdx]
 	if nd.Expiry >= 0 && nd.Expiry < int(time.Now().Unix()) {
 		sl.Mu.Unlock()
+		st.bucketsMu.RUnlock()
 		return false
 	}
 	p := len(bKey)
@@ -429,18 +461,9 @@ func (st *Store) write(key string, val []byte, ua updateAction, expiry int, f Ge
 		}
 	}
 	sl.Mu.Unlock()
-
-	kc := int(st.stats.KeyCount)
-	sc := int(st.stats.SlotCount)
-	if kc > sc {
-		go st.expand(kc - sc)
-	}
-	if key == "shrink" {
-		go st.shrink(1)
-	}
-
 	st.bucketsMu.RUnlock()
 	atomic.AddInt64(&st.stats.SucOperCount, 1)
+	st.fixLoadFactor()
 	return true
 }
 
@@ -470,6 +493,7 @@ func (st *Store) Del(key string) bool {
 	ndIdx := sl.FindNode(keyHash, bKey)
 	if ndIdx < 0 {
 		sl.Mu.Unlock()
+		st.bucketsMu.RUnlock()
 		return false
 	}
 	nd := &sl.Nodes[ndIdx]
@@ -480,5 +504,6 @@ func (st *Store) Del(key string) bool {
 	sl.Mu.Unlock()
 	st.bucketsMu.RUnlock()
 	atomic.AddInt64(&st.stats.SucOperCount, 1)
+	st.fixLoadFactor()
 	return true
 }
