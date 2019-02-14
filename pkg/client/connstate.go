@@ -2,7 +2,6 @@ package client
 
 import (
 	"net"
-	"runtime"
 	"sync"
 
 	"github.com/orkunkaraduman/zelus/pkg/buffer"
@@ -33,9 +32,14 @@ func newConnState(conn net.Conn) (cs *connState) {
 
 func (cs *connState) OnReadCmd(cmd protocol.Cmd) (count int) {
 	cs.rCmd = cmd
-	if cs.rCmd.Name == "QUIT" || cs.rCmd.Name == "ERROR" {
+	if cs.rCmd.Name == "QUIT" || cs.rCmd.Name == "FATAL" {
 		count = -1
 		return
+	}
+	if cs.rCmd.Name == "PONG" {
+		if cs.sCmd.Name == "PING" {
+			return
+		}
 	}
 	if cs.rCmd.Name == "OK" {
 		if cs.sCmd.Name == "GET" {
@@ -49,7 +53,7 @@ func (cs *connState) OnReadCmd(cmd protocol.Cmd) (count int) {
 			return
 		}
 	}
-	panic(&protocol.Error{Err: ErrUnknownCommand, Cmd: cs.rCmd})
+	panic(&protocol.Error{Err: ErrUnexpectedCommand, Cmd: cs.rCmd})
 }
 
 func (cs *connState) OnReadData(count int, index int, data []byte, expiry int) {
@@ -64,7 +68,6 @@ func (cs *connState) OnReadData(count int, index int, data []byte, expiry int) {
 func (cs *connState) OnQuit(e error) {
 	if e != nil {
 		go cs.Close(e)
-		runtime.Gosched()
 	}
 }
 
@@ -82,14 +85,15 @@ func (cs *connState) Close(e error) {
 		cs.mu.Unlock()
 	}()
 	if e != nil {
+		cmd := protocol.Cmd{Name: "FATAL"}
 		if e, ok := e.(*protocol.Error); ok {
-			cmd := protocol.Cmd{Name: "ERROR", Args: []string{e.Err.Error()}}
-			if e.Err == ErrUnknownCommand {
+			cmd.Args = append(cmd.Args, e.Err.Error())
+			if e.Err == ErrUnexpectedCommand {
 				cmd.Args = append(cmd.Args, e.Cmd.Name)
 			}
-			cs.SendCmd(cmd)
-			return
 		}
+		cs.SendCmd(cmd)
+		return
 	}
 	cs.SendCmd(protocol.Cmd{Name: "QUIT"})
 }
@@ -99,6 +103,32 @@ func (cs *connState) IsClosed() bool {
 	r := cs.closed
 	cs.mu.Unlock()
 	return r
+}
+
+func (cs *connState) Ping() (err error) {
+	cs.mu.Lock()
+	defer func() {
+		err, _ = recover().(error)
+		cs.OnQuit(err)
+		cs.mu.Unlock()
+	}()
+	if cs.closed {
+		panic(nil)
+	}
+	cmd := protocol.Cmd{Name: "PING"}
+	err = cs.SendCmd(cmd)
+	if err != nil {
+		panic(err)
+	}
+	err = cs.Flush()
+	if err != nil {
+		panic(err)
+	}
+	cs.sCmd = cmd
+	if !cs.Receive(cs, cs.bf) {
+		panic(nil)
+	}
+	return
 }
 
 func (cs *connState) Get(keys []string, f GetFunc) (err error) {

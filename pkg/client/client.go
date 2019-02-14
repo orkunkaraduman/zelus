@@ -3,13 +3,13 @@ package client
 import (
 	"context"
 	"net"
-	"runtime"
 	"time"
 )
 
 type Client struct {
-	conn net.Conn
-	cs   *connState
+	network, address string
+	conn             net.Conn
+	cs               *connState
 }
 
 type GetFunc func(index int, key string, val []byte, expiry int)
@@ -19,9 +19,13 @@ var (
 	ConnBufferSize = 0
 )
 
-func New(network, address string) (cl *Client, err error) {
+func New(network, address string, timeout time.Duration) (cl *Client, err error) {
 	var conn net.Conn
-	conn, err = net.Dial(network, address)
+	d := net.Dialer{
+		Timeout:   timeout,
+		KeepAlive: 65 * time.Second,
+	}
+	conn, err = d.Dial(network, address)
 	if err != nil {
 		return
 	}
@@ -36,15 +40,16 @@ func New(network, address string) (cl *Client, err error) {
 		}
 	}
 	cl = &Client{
-		conn: conn,
-		cs:   newConnState(conn),
+		network: network,
+		address: address,
+		conn:    conn,
+		cs:      newConnState(conn),
 	}
 	return
 }
 
 func (cl *Client) Shutdown(ctx context.Context) (err error) {
 	go cl.cs.Close(nil)
-	runtime.Gosched()
 	for {
 		select {
 		case <-time.After(5 * time.Millisecond):
