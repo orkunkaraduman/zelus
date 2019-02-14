@@ -53,7 +53,7 @@ func (cs *connState) OnReadCmd(cmd protocol.Cmd) (count int) {
 			return
 		}
 	}
-	panic(&protocol.Error{Err: ErrUnexpectedCommand, Cmd: cs.rCmd})
+	panic(&protocol.Error{Err: ErrProtocolUnexpectedCommand, Cmd: cs.rCmd})
 }
 
 func (cs *connState) OnReadData(count int, index int, data []byte, expiry int) {
@@ -67,7 +67,7 @@ func (cs *connState) OnReadData(count int, index int, data []byte, expiry int) {
 
 func (cs *connState) OnQuit(e error) {
 	if e != nil {
-		go cs.Close(e)
+		cs.Close(e)
 	}
 }
 
@@ -88,7 +88,7 @@ func (cs *connState) Close(e error) {
 		cmd := protocol.Cmd{Name: "FATAL"}
 		if e, ok := e.(*protocol.Error); ok {
 			cmd.Args = append(cmd.Args, e.Err.Error())
-			if e.Err == ErrUnexpectedCommand {
+			if e.Err == ErrProtocolUnexpectedCommand {
 				cmd.Args = append(cmd.Args, e.Cmd.Name)
 			}
 		}
@@ -109,11 +109,11 @@ func (cs *connState) Ping() (err error) {
 	cs.mu.Lock()
 	defer func() {
 		err, _ = recover().(error)
-		cs.OnQuit(err)
 		cs.mu.Unlock()
+		cs.OnQuit(err)
 	}()
 	if cs.closed {
-		panic(nil)
+		panic(ErrClosed)
 	}
 	cmd := protocol.Cmd{Name: "PING"}
 	err = cs.SendCmd(cmd)
@@ -135,11 +135,11 @@ func (cs *connState) Get(keys []string, f GetFunc) (err error) {
 	cs.mu.Lock()
 	defer func() {
 		err, _ = recover().(error)
-		cs.OnQuit(err)
 		cs.mu.Unlock()
+		cs.OnQuit(err)
 	}()
 	if cs.closed {
-		panic(nil)
+		panic(ErrClosed)
 	}
 	cmd := protocol.Cmd{Name: "GET", Args: keys}
 	err = cs.SendCmd(cmd)
@@ -162,11 +162,11 @@ func (cs *connState) Set(keys []string, f SetFunc) (k []string, err error) {
 	cs.mu.Lock()
 	defer func() {
 		err, _ = recover().(error)
-		cs.OnQuit(err)
 		cs.mu.Unlock()
+		cs.OnQuit(err)
 	}()
 	if cs.closed {
-		panic(nil)
+		panic(ErrClosed)
 	}
 	cmd := protocol.Cmd{Name: "SET", Args: keys}
 	err = cs.SendCmd(cmd)
@@ -199,11 +199,11 @@ func (cs *connState) Put(keys []string, f SetFunc) (k []string, err error) {
 	cs.mu.Lock()
 	defer func() {
 		err, _ = recover().(error)
-		cs.OnQuit(err)
 		cs.mu.Unlock()
+		cs.OnQuit(err)
 	}()
 	if cs.closed {
-		panic(nil)
+		panic(ErrClosed)
 	}
 	cmd := protocol.Cmd{Name: "PUT", Args: keys}
 	err = cs.SendCmd(cmd)
@@ -236,11 +236,11 @@ func (cs *connState) Append(keys []string, f SetFunc) (k []string, err error) {
 	cs.mu.Lock()
 	defer func() {
 		err, _ = recover().(error)
-		cs.OnQuit(err)
 		cs.mu.Unlock()
+		cs.OnQuit(err)
 	}()
 	if cs.closed {
-		panic(nil)
+		panic(ErrClosed)
 	}
 	cmd := protocol.Cmd{Name: "APPEND", Args: keys}
 	err = cs.SendCmd(cmd)
@@ -273,11 +273,11 @@ func (cs *connState) Del(keys []string) (k []string, err error) {
 	cs.mu.Lock()
 	defer func() {
 		err, _ = recover().(error)
-		cs.OnQuit(err)
 		cs.mu.Unlock()
+		cs.OnQuit(err)
 	}()
 	if cs.closed {
-		panic(nil)
+		panic(ErrClosed)
 	}
 	cmd := protocol.Cmd{Name: "DEL", Args: keys}
 	err = cs.SendCmd(cmd)

@@ -3,5 +3,6 @@ package client
 import "errors"
 
 var (
-	ErrUnexpectedCommand = errors.New("unexpected command")
+	ErrClosed                    = errors.New("closed")
+	ErrProtocolUnexpectedCommand = errors.New("unexpected command")
 )

@@ -54,15 +54,11 @@ func (cl *Client) Shutdown(ctx context.Context) (err error) {
 		select {
 		case <-time.After(5 * time.Millisecond):
 			if cl.cs.IsClosed() {
-				err = cl.conn.Close()
 				return
 			}
 		case <-ctx.Done():
-			cl.conn.Close()
+			cl.Close()
 			err = ctx.Err()
-			for !cl.cs.IsClosed() {
-				time.Sleep(5 * time.Millisecond)
-			}
 			return
 		}
 	}
@@ -76,6 +72,26 @@ func (cl *Client) Close() (err error) {
 
 func (cl *Client) IsClosed() bool {
 	return cl.cs.IsClosed()
+}
+
+func (cl *Client) Ping(ctx context.Context) (err error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	e := error(nil)
+	c := make(chan struct{})
+	go func() {
+		e = cl.cs.Ping()
+		c <- struct{}{}
+	}()
+	select {
+	case <-c:
+		err = e
+	case <-ctx.Done():
+		cl.Close()
+		err = ctx.Err()
+	}
+	return
 }
 
 func (cl *Client) Get(keys []string, f GetFunc) (err error) {
