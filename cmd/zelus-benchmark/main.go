@@ -60,9 +60,9 @@ func main() {
 	}()
 	for i := range cls {
 		if ca.Socket == "" {
-			cls[i], err = client.New("tcp", ca.Hostname, 1*time.Second)
+			cls[i], err = client.New("tcp", ca.Hostname, 1*time.Second, 0)
 		} else {
-			cls[i], err = client.New("unix", ca.Socket, 1*time.Second)
+			cls[i], err = client.New("unix", ca.Socket, 1*time.Second, 0)
 		}
 		if err != nil {
 			panic(err)

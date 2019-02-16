@@ -9,24 +9,28 @@ import (
 type Client struct {
 	network, address string
 	conn             net.Conn
+	pingTimeout      time.Duration
 	cs               *connState
 }
 
-type GetFunc func(index int, key string, val []byte, expiry int)
-type SetFunc func(index int, key string) (val []byte, expiry int)
+type GetFunc func(index int, key string, val []byte, expires int)
+type SetFunc func(index int, key string) (val []byte, expires int)
 
 var (
 	ConnBufferSize = 0
 )
 
-func New(network, address string, timeout time.Duration) (cl *Client, err error) {
+func New(network, address string, connectTimeout, pingTimeout time.Duration) (cl *Client, err error) {
 	var conn net.Conn
 	d := net.Dialer{
-		Timeout:   timeout,
+		Timeout:   connectTimeout,
 		KeepAlive: 65 * time.Second,
 	}
 	conn, err = d.Dial(network, address)
 	if err != nil {
+		if conn != nil {
+			conn.Close()
+		}
 		return
 	}
 	if ConnBufferSize > 0 {
@@ -40,10 +44,11 @@ func New(network, address string, timeout time.Duration) (cl *Client, err error)
 		}
 	}
 	cl = &Client{
-		network: network,
-		address: address,
-		conn:    conn,
-		cs:      newConnState(conn),
+		network:     network,
+		address:     address,
+		conn:        conn,
+		pingTimeout: pingTimeout,
+		cs:          newConnState(conn),
 	}
 	return
 }
@@ -74,11 +79,24 @@ func (cl *Client) IsClosed() bool {
 	return cl.cs.IsClosed()
 }
 
-func (cl *Client) Ping(ctx context.Context) (err error) {
-	if ctx == nil {
+func (cl *Client) Network() string {
+	return cl.network
+}
+
+func (cl *Client) Address() string {
+	return cl.address
+}
+
+func (cl *Client) Ping() (err error) {
+	var ctx context.Context
+	if cl.pingTimeout == 0 {
 		ctx = context.Background()
+	} else {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(context.Background(), cl.pingTimeout)
+		defer cancel()
 	}
-	e := error(nil)
+	var e error
 	c := make(chan struct{})
 	go func() {
 		e = cl.cs.Ping()

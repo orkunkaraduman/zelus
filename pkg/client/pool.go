@@ -45,7 +45,7 @@ func (p *Pool) pinger() {
 				if len(p.pingerCloseCh) != 0 {
 					break
 				}
-				cl.Ping(nil)
+				cl.Ping()
 			}
 			if len(p.pingerCloseCh) != 0 {
 				break
@@ -113,7 +113,7 @@ func (p *Pool) Get(network, address string) (cl *Client) {
 }
 
 func (p *Pool) Put(cl *Client) {
-	if cl == nil {
+	if cl == nil || cl.IsClosed() {
 		return
 	}
 	a := cl.network + "://" + cl.address

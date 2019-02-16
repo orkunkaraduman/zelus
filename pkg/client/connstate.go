@@ -1,6 +1,7 @@
 package client
 
 import (
+	"io"
 	"net"
 	"sync"
 
@@ -56,10 +57,10 @@ func (cs *connState) OnReadCmd(cmd protocol.Cmd) (count int) {
 	panic(&protocol.Error{Err: ErrProtocolUnexpectedCommand, Cmd: cs.rCmd})
 }
 
-func (cs *connState) OnReadData(count int, index int, data []byte, expiry int) {
+func (cs *connState) OnReadData(count int, index int, data []byte, expires int) {
 	if cs.rCmd.Name == "OK" {
 		if cs.sCmd.Name == "GET" {
-			cs.gf(index, cs.rCmd.Args[index], data, expiry)
+			cs.gf(index, cs.rCmd.Args[index], data, expires)
 			return
 		}
 	}
@@ -84,7 +85,7 @@ func (cs *connState) Close(e error) {
 		cs.closed = true
 		cs.mu.Unlock()
 	}()
-	if e != nil {
+	if e != nil && e != io.EOF {
 		cmd := protocol.Cmd{Name: "FATAL"}
 		if e, ok := e.(*protocol.Error); ok {
 			cmd.Args = append(cmd.Args, e.Err.Error())
@@ -174,8 +175,8 @@ func (cs *connState) Set(keys []string, f SetFunc) (k []string, err error) {
 		panic(err)
 	}
 	for index, key := range keys {
-		val, expiry := f(index, key)
-		err = cs.SendData(val, expiry)
+		val, expires := f(index, key)
+		err = cs.SendData(val, expires)
 		if err != nil {
 			panic(err)
 		}
@@ -211,8 +212,8 @@ func (cs *connState) Put(keys []string, f SetFunc) (k []string, err error) {
 		panic(err)
 	}
 	for index, key := range keys {
-		val, expiry := f(index, key)
-		err = cs.SendData(val, expiry)
+		val, expires := f(index, key)
+		err = cs.SendData(val, expires)
 		if err != nil {
 			panic(err)
 		}
@@ -248,8 +249,8 @@ func (cs *connState) Append(keys []string, f SetFunc) (k []string, err error) {
 		panic(err)
 	}
 	for index, key := range keys {
-		val, expiry := f(index, key)
-		err = cs.SendData(val, expiry)
+		val, expires := f(index, key)
+		err = cs.SendData(val, expires)
 		if err != nil {
 			panic(err)
 		}
