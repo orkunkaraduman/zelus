@@ -73,7 +73,7 @@ func (prt *Protocol) SendLine(line []byte) (err error) {
 	return
 }
 
-func (prt *Protocol) SendData(data []byte, expiry int) (err error) {
+func (prt *Protocol) SendData(data []byte, expires int) (err error) {
 	prt.wrMu.Lock()
 	_, err = prt.wr.Write([]byte("\r\n"))
 	if err != nil {
@@ -94,7 +94,7 @@ func (prt *Protocol) SendData(data []byte, expiry int) (err error) {
 		prt.wrMu.Unlock()
 		return
 	}
-	_, err = prt.wr.Write([]byte(strconv.Itoa(expiry)))
+	_, err = prt.wr.Write([]byte(strconv.Itoa(expires)))
 	if err != nil {
 		prt.wrMu.Unlock()
 		return
@@ -189,22 +189,22 @@ func (prt *Protocol) Receive(rc Receiver, bf *buffer.Buffer) bool {
 			panic(err)
 		}
 		line = trimCrLf(line)
-		var bSize, bExpiry []byte
+		var bSize, bExpires []byte
 		idx := bytes.IndexByte(line, ' ')
 		if idx < 0 {
 			bSize = line
 		} else {
 			bSize = line[:idx]
-			bExpiry = line[idx+1:]
+			bExpires = line[idx+1:]
 		}
 		var size int
 		size, err = strconv.Atoi(string(bSize))
 		if err != nil {
 			panic(&Error{Err: ErrProtocol})
 		}
-		var expiry = int(-1)
-		if bExpiry != nil {
-			expiry, err = strconv.Atoi(string(bExpiry))
+		var expires = int(-1)
+		if bExpires != nil {
+			expires, err = strconv.Atoi(string(bExpires))
 			if err != nil {
 				panic(&Error{Err: ErrProtocol})
 			}
@@ -212,7 +212,7 @@ func (prt *Protocol) Receive(rc Receiver, bf *buffer.Buffer) bool {
 
 		// read null data
 		if size < 0 {
-			rc.OnReadData(count, i, nil, expiry)
+			rc.OnReadData(count, i, nil, expires)
 			continue
 		}
 
@@ -233,7 +233,7 @@ func (prt *Protocol) Receive(rc Receiver, bf *buffer.Buffer) bool {
 		if len(line) != 0 {
 			panic(&Error{Err: ErrProtocol})
 		}
-		rc.OnReadData(count, i, data, expiry)
+		rc.OnReadData(count, i, data, expires)
 	}
 	err = prt.Flush()
 	if err != nil {
