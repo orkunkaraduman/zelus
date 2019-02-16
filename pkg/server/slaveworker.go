@@ -1,6 +1,6 @@
 package server
 
-import (
+/*import (
 	"context"
 	"sync"
 	"time"
@@ -54,7 +54,7 @@ func (sw *slaveWorker) run() {
 			keys = keys[:0]
 			for len(sw.closeCh) == 0 {
 				if sw.cl == nil || sw.cl.IsClosed() {
-					cl, _ := client.New("tcp", sw.addr)
+					cl, _ := client.New("tcp", sw.addr, 1*time.Second)
 					if cl == nil {
 						time.Sleep(250 * time.Millisecond)
 						continue
@@ -95,4 +95,4 @@ func (sw *slaveWorker) run() {
 			}
 		}
 	}
-}
+}*/

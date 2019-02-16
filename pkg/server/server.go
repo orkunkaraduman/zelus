@@ -5,15 +5,30 @@ import (
 	"log"
 	"net"
 	"os"
+	"sync"
 
 	accepter "github.com/orkunkaraduman/go-accepter"
+	"github.com/orkunkaraduman/zelus/pkg/client"
 	"github.com/orkunkaraduman/zelus/pkg/store"
+	"github.com/orkunkaraduman/zelus/pkg/wrh"
 )
 
 type Server struct {
 	st *store.Store
 	ac *accepter.Accepter
-	sh *slaveHandler
+
+	nodePool     *client.Pool
+	nodesMu      sync.RWMutex
+	clustered    bool
+	nodeID       uint32
+	nodeBackups  uint
+	nodeBackups2 uint
+	nodes        []wrh.Node
+	nodes2       []wrh.Node
+	nodeAddrs    map[uint32]string
+	nodeAddrs2   map[uint32]string
+	reshardNeed  bool
+	reshardMu    sync.Mutex
 }
 
 var (
@@ -26,7 +41,7 @@ func New(st *store.Store) (srv *Server) {
 		ac: &accepter.Accepter{
 			ErrorLog: log.New(os.Stderr, "", log.LstdFlags),
 		},
-		sh: newSlaveHandler(),
+		nodePool: client.NewPool(1024),
 	}
 	srv.ac.Handler = accepter.HandlerFunc(srv.serve)
 	return
@@ -41,12 +56,12 @@ func (srv *Server) TCPListenAndServe(addr string) error {
 }
 
 func (srv *Server) Shutdown(ctx context.Context) error {
-	srv.sh.Close()
+	srv.nodePool.Close()
 	return srv.ac.Shutdown(ctx)
 }
 
 func (srv *Server) Close() error {
-	srv.sh.Close()
+	srv.nodePool.Close()
 	return srv.ac.Close()
 }
 

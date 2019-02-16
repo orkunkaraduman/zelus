@@ -1,6 +1,6 @@
 package server
 
-import (
+/*import (
 	"sync"
 	"time"
 
@@ -70,7 +70,7 @@ func (sh *slaveHandler) Add(addr string) (cl *client.Client) {
 		sh.mu.Unlock()
 		return
 	}
-	cl, _ = client.New("tcp", addr)
+	cl, _ = client.New("tcp", addr, 1*time.Second)
 	if cl == nil {
 		sh.mu.Unlock()
 		return
@@ -92,4 +92,4 @@ func (sh *slaveHandler) Remove(addr string) bool {
 	sw.Close()
 	sh.mu.Unlock()
 	return true
-}
+}*/
