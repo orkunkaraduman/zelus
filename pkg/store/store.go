@@ -81,6 +81,9 @@ func (st *Store) disposer() {
 		case <-tk.C:
 			st.bucketsMu.RLock()
 			for _, bu := range st.buckets {
+				if len(st.disposerCloseCh) != 0 {
+					break
+				}
 				for i := range bu {
 					if len(st.disposerCloseCh) != 0 {
 						break
