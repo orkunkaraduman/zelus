@@ -462,31 +462,32 @@ func (cs *connState) cmdGet() (count int) {
 			var expires int
 			if cs.srv.st.Get(key, func(size int, index int, data []byte, expiry int) (cont bool) {
 				if index == 0 {
-					val = cs.bf.Want(size)
+					//val = cs.bf.Want(size)
+					val = make([]byte, size)
 					expires = toExpires(expiry)
 				}
 				copy(val[index:], data)
 				return
 			}) {
-				err = cs.SendData(val, expires)
+				cs.cb <- keyVal{
+					Key:     key,
+					Val:     val,
+					Expires: expires,
+				}
+				cs.cbLen++
 			} else {
-				err = cs.SendData(nil, -1)
-			}
-		} else {
-			cb := <-cs.cb
-			cs.cbLen--
-			if kv, ok := cb.(keyVal); ok {
-				err = cs.SendData(kv.Val, kv.Expires)
-			} else {
-				err = cs.SendData(nil, -1)
+				cs.cb <- nil
+				cs.cbLen++
 			}
 		}
-		if err != nil {
-			for cs.cbLen > 0 {
-				<-cs.cb
-				cs.cbLen--
-			}
-			panic(err)
+	}
+	for cs.cbLen > 0 {
+		cb := <-cs.cb
+		cs.cbLen--
+		if kv, ok := cb.(keyVal); ok {
+			err = cs.SendData(kv.Val, kv.Expires)
+		} else {
+			err = cs.SendData(nil, -1)
 		}
 	}
 	return

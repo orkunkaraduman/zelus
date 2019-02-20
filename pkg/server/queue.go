@@ -26,8 +26,6 @@ type queue struct {
 	workerClosedCh              chan struct{}
 }
 
-var errQueueRemote = errors.New("remote error")
-
 func newQueue(addr string, connectTimeout, pingTimeout time.Duration, connectRetryCount int, maxLen, maxSize int,
 	cmdName string, standalone bool) (q *queue) {
 	q = &queue{
@@ -170,7 +168,7 @@ func (q *queue) worker() {
 					i, j := 0, len(k)
 					for idx := range kvs {
 						if i >= j || k[i] != kvs[idx].Key {
-							q.remove(kvs[idx], errQueueRemote)
+							q.remove(kvs[idx], nil)
 							continue
 						}
 						q.remove(kvs[idx], kvs[idx])
