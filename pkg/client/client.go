@@ -112,6 +112,11 @@ func (cl *Client) Ping() (err error) {
 	return
 }
 
+func (cl *Client) Standalone() (err error) {
+	cl.cs.Standalone()
+	return
+}
+
 func (cl *Client) Get(keys []string, f GetFunc) (err error) {
 	return cl.cs.Get(keys, f)
 }

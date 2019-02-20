@@ -42,6 +42,11 @@ func (cs *connState) OnReadCmd(cmd protocol.Cmd) (count int) {
 			return
 		}
 	}
+	if cs.rCmd.Name == "STANDALONE" {
+		if cs.sCmd.Name == "STANDALONE" {
+			return
+		}
+	}
 	if cs.rCmd.Name == "OK" {
 		if cs.sCmd.Name == "GET" {
 			count = len(cs.rCmd.Args)
@@ -117,6 +122,32 @@ func (cs *connState) Ping() (err error) {
 		panic(ErrClosed)
 	}
 	cmd := protocol.Cmd{Name: "PING"}
+	err = cs.SendCmd(cmd)
+	if err != nil {
+		panic(err)
+	}
+	err = cs.Flush()
+	if err != nil {
+		panic(err)
+	}
+	cs.sCmd = cmd
+	if !cs.Receive(cs, cs.bf) {
+		panic(nil)
+	}
+	return
+}
+
+func (cs *connState) Standalone() (err error) {
+	cs.mu.Lock()
+	defer func() {
+		err, _ = recover().(error)
+		cs.mu.Unlock()
+		cs.OnQuit(err)
+	}()
+	if cs.closed {
+		panic(ErrClosed)
+	}
+	cmd := protocol.Cmd{Name: "STANDALONE"}
 	err = cs.SendCmd(cmd)
 	if err != nil {
 		panic(err)
