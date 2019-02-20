@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -108,6 +109,20 @@ func (cs *connState) cmdStats() (count int) {
 		panic(err)
 	}
 	err = cs.SendData([]byte(str), -1)
+	if err != nil {
+		panic(err)
+	}
+	return
+}
+
+func (cs *connState) cmdDebugStack() (count int) {
+	var err error
+	err = cs.SendCmd(protocol.Cmd{Name: "OK"})
+	if err != nil {
+		panic(err)
+	}
+	var buf [102400]byte
+	err = cs.SendData(buf[:runtime.Stack(buf[:], true)], 0)
 	if err != nil {
 		panic(err)
 	}
@@ -639,25 +654,29 @@ func (cs *connState) OnReadCmd(cmd protocol.Cmd) (count int) {
 	if cs.rCmd.Name == "STATS" {
 		return cs.cmdStats()
 	}
+	if cs.rCmd.Name == "DEBUG" {
+		subCmd := strings.ToUpper(cs.rCmd.Args[0])
+		cs.rCmd.Args = cs.rCmd.Args[1:]
+		switch subCmd {
+		case "STACK":
+			return cs.cmdDebugStack()
+		}
+	}
 	if cs.rCmd.Name == "CLUSTER" && len(cs.rCmd.Args) >= 1 {
-		switch strings.ToUpper(cs.rCmd.Args[0]) {
+		subCmd := strings.ToUpper(cs.rCmd.Args[0])
+		cs.rCmd.Args = cs.rCmd.Args[1:]
+		switch subCmd {
 		case "INIT":
-			cs.rCmd.Args = cs.rCmd.Args[1:]
 			return cs.cmdClusterInit()
 		case "NODEADD":
-			cs.rCmd.Args = cs.rCmd.Args[1:]
 			return cs.cmdClusterNodeadd()
 		case "NODERM":
-			cs.rCmd.Args = cs.rCmd.Args[1:]
 			return cs.cmdClusterNoderm()
 		case "RESHARD":
-			cs.rCmd.Args = cs.rCmd.Args[1:]
 			return cs.cmdClusterReshard()
 		case "CLEAN":
-			cs.rCmd.Args = cs.rCmd.Args[1:]
 			return cs.cmdClusterClean()
 		case "WAIT":
-			cs.rCmd.Args = cs.rCmd.Args[1:]
 			return cs.cmdClusterWait()
 		}
 	}
