@@ -173,7 +173,7 @@ func (q *queue) worker() {
 							q.remove(kvs[idx], errQueueRemote)
 							continue
 						}
-						q.remove(kv, kvs[idx])
+						q.remove(kvs[idx], kvs[idx])
 						kvs[idx].Val = nil
 						i++
 					}
