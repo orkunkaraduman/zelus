@@ -1,6 +1,6 @@
 package server
 
-type KeyVal struct {
+type keyVal struct {
 	Key      string
 	Val      []byte
 	Expires  int

@@ -3,5 +3,5 @@ package server
 import "errors"
 
 var (
-	ErrUnknownCommand = errors.New("unknown command")
+	ErrProtocolUnexpectedCommand = errors.New("unexpected command")
 )

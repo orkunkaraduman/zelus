@@ -9,7 +9,7 @@ import (
 	"github.com/orkunkaraduman/zelus/pkg/client"
 )
 
-type SetQueue struct {
+type setQueue struct {
 	mu                          sync.RWMutex
 	addr                        string
 	connectTimeout, pingTimeout time.Duration
@@ -18,7 +18,7 @@ type SetQueue struct {
 	cmdName                     string
 	standalone                  bool
 	cl                          *client.Client
-	qu                          chan KeyVal
+	qu                          chan keyVal
 	quSize                      int64
 	pingerCloseCh               chan struct{}
 	pingerClosedCh              chan struct{}
@@ -26,11 +26,11 @@ type SetQueue struct {
 	workerClosedCh              chan struct{}
 }
 
-var ErrSetQueueRemoteSet = errors.New("remote SET error")
+var errSetQueueRemoteSet = errors.New("remote SET error")
 
 func NewSetQueue(addr string, connectTimeout, pingTimeout time.Duration, connectRetryCount int, maxLen, maxSize int,
-	cmdName string, standalone bool) (sq *SetQueue) {
-	sq = &SetQueue{
+	cmdName string, standalone bool) (sq *setQueue) {
+	sq = &setQueue{
 		addr:              addr,
 		connectTimeout:    connectTimeout,
 		pingTimeout:       pingTimeout,
@@ -50,13 +50,13 @@ func NewSetQueue(addr string, connectTimeout, pingTimeout time.Duration, connect
 	if sq.maxSize < 0 {
 		sq.maxSize = 0
 	}
-	sq.qu = make(chan KeyVal, sq.maxLen)
+	sq.qu = make(chan keyVal, sq.maxLen)
 	go sq.pinger()
 	go sq.worker()
 	return
 }
 
-func (sq *SetQueue) Close() {
+func (sq *setQueue) Close() {
 	select {
 	case sq.pingerCloseCh <- struct{}{}:
 	default:
@@ -72,7 +72,7 @@ func (sq *SetQueue) Close() {
 	}
 }
 
-func (sq *SetQueue) checkClient() (err error) {
+func (sq *setQueue) checkClient() (err error) {
 	if sq.cl != nil && !sq.cl.IsClosed() {
 		return
 	}
@@ -89,7 +89,7 @@ func (sq *SetQueue) checkClient() (err error) {
 	return
 }
 
-func (sq *SetQueue) pinger() {
+func (sq *setQueue) pinger() {
 	tk := time.NewTicker(15 * time.Second)
 	for {
 		done := false
@@ -111,10 +111,10 @@ func (sq *SetQueue) pinger() {
 	close(sq.pingerClosedCh)
 }
 
-func (sq *SetQueue) worker() {
+func (sq *setQueue) worker() {
 	multi := 128
 	keys := make([]string, 0, multi)
-	kvs := make([]KeyVal, 0, multi)
+	kvs := make([]keyVal, 0, multi)
 	for {
 		done := false
 		select {
@@ -157,7 +157,7 @@ func (sq *SetQueue) worker() {
 					i, j := 0, len(k)
 					for _, kv := range kvs {
 						if i >= j || k[i] != kv.Key {
-							sq.remove(kv, ErrSetQueueRemoteSet)
+							sq.remove(kv, errSetQueueRemoteSet)
 							continue
 						}
 						sq.remove(kv, nil)
@@ -180,14 +180,14 @@ func (sq *SetQueue) worker() {
 	close(sq.workerClosedCh)
 }
 
-func (sq *SetQueue) remove(kv KeyVal, e error) {
+func (sq *setQueue) remove(kv keyVal, e error) {
 	atomic.AddInt64(&sq.quSize, int64(-len(kv.Val)))
 	if kv.CallBack != nil {
 		kv.CallBack <- e
 	}
 }
 
-func (sq *SetQueue) Add(kv KeyVal) {
+func (sq *setQueue) Add(kv keyVal) {
 	for sq.maxSize > 0 && sq.quSize > int64(sq.maxSize) {
 		time.Sleep(5 * time.Millisecond)
 	}

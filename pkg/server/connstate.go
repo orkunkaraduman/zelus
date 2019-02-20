@@ -295,7 +295,7 @@ func (cs *connState) cmdClusterReshard() (count int) {
 						continue
 					}
 					q := cs.srv.nodeQueueGroups[id]
-					kv := KeyVal{
+					kv := keyVal{
 						Key:      key,
 						Val:      val,
 						Expires:  toExpires(expiry),
@@ -446,7 +446,6 @@ func (cs *connState) cmdSet() (count int) {
 
 func (cs *connState) cmddataSet(count int, index int, data []byte, expires int) {
 	var err error
-	expiry := toExpiry(expires)
 	key := cs.rCmd.Args[index]
 	if key != "" {
 		var storeSet bool
@@ -487,10 +486,10 @@ func (cs *connState) cmddataSet(count int, index int, data []byte, expires int) 
 								continue
 							}
 							q := cs.srv.nodeQueueGroups[id]
-							kv := KeyVal{
+							kv := keyVal{
 								Key:      key,
 								Val:      val,
-								Expires:  toExpires(expiry),
+								Expires:  expires,
 								CallBack: cs.cb,
 							}
 							q.nodeSetQueue.Add(kv)
@@ -502,10 +501,10 @@ func (cs *connState) cmddataSet(count int, index int, data []byte, expires int) 
 			} else {
 				id := masterID
 				q := cs.srv.nodeQueueGroups[id]
-				kv := KeyVal{
+				kv := keyVal{
 					Key:      key,
 					Val:      data,
-					Expires:  toExpires(expiry),
+					Expires:  expires,
 					CallBack: cs.cb,
 				}
 				switch cs.rCmd.Name {
@@ -522,6 +521,7 @@ func (cs *connState) cmddataSet(count int, index int, data []byte, expires int) 
 			}
 		}
 		if storeSet {
+			expiry := toExpiry(expires)
 			switch cs.rCmd.Name {
 			case "SET":
 				if !cs.srv.st.Set(key, data, expiry, f) {
@@ -624,7 +624,7 @@ func (cs *connState) OnReadCmd(cmd protocol.Cmd) (count int) {
 	if cs.rCmd.Name == "DEL" {
 		return cs.cmdDel()
 	}
-	panic(&protocol.Error{Err: ErrUnknownCommand, Cmd: cs.rCmd})
+	panic(&protocol.Error{Err: ErrProtocolUnexpectedCommand, Cmd: cs.rCmd})
 }
 
 func (cs *connState) OnReadData(count int, index int, data []byte, expires int) {
@@ -643,7 +643,7 @@ func (cs *connState) OnQuit(e error) {
 		cmd := protocol.Cmd{Name: "FATAL"}
 		if e, ok := e.(*protocol.Error); ok {
 			cmd.Args = append(cmd.Args, e.Err.Error())
-			if e.Err == ErrUnknownCommand {
+			if e.Err == ErrProtocolUnexpectedCommand {
 				cmd.Args = append(cmd.Args, e.Cmd.Name)
 			}
 		}

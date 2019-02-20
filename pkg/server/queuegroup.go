@@ -4,10 +4,10 @@ import "time"
 
 type queueGroup struct {
 	addr              string
-	nodeSetQueue      *SetQueue
-	masterSetQueue    *SetQueue
-	masterPutQueue    *SetQueue
-	masterAppendQueue *SetQueue
+	nodeSetQueue      *setQueue
+	masterSetQueue    *setQueue
+	masterPutQueue    *setQueue
+	masterAppendQueue *setQueue
 	remove            bool
 }
 
