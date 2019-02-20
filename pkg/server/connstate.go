@@ -46,7 +46,7 @@ func newConnState(srv *Server, conn net.Conn) (cs *connState) {
 		conn:     conn,
 		Protocol: protocol.New(conn, conn),
 		bf:       buffer.New(),
-		cb:       make(chan interface{}, 128),
+		cb:       make(chan interface{}, 1024),
 	}
 	return
 }
@@ -410,21 +410,67 @@ func (cs *connState) cmdGet() (count int) {
 		panic(err)
 	}
 	for _, key := range keys {
-		var buf []byte
-		var expires int
-		if cs.srv.st.Get(key, func(size int, index int, data []byte, expiry int) (cont bool) {
-			if index == 0 {
-				buf = cs.bf.Want(size)
-				expires = toExpires(expiry)
+		var useStore bool
+		for {
+			cs.srv.nodesMu.RLock()
+			if cs.srv.clusterState == clusterStateReshardWait || cs.srv.clusterState == clusterStateCleanWait {
+				cs.srv.nodesMu.RUnlock()
+				time.Sleep(5 * time.Millisecond)
+			} else {
+				break
 			}
-			copy(buf[index:], data)
-			return
-		}) {
-			err = cs.SendData(buf, expires)
+		}
+		if cs.standalone {
+			useStore = true
 		} else {
-			err = cs.SendData(nil, -1)
+			cs.allocRespNodes()
+			wrh.ResponsibleNodes(cs.srv.nodes, []byte(key), cs.respNodes)
+			masterID := wrh.MaxSeed(cs.respNodes)
+			if masterID == cs.srv.nodeID {
+				useStore = true
+			} else {
+				id := masterID
+				q := cs.srv.nodeQueueGroups[id]
+				kv := keyVal{
+					Key:      key,
+					Val:      nil,
+					Expires:  -1,
+					CallBack: cs.cb,
+				}
+				q.nodeGetQueue.Add(kv)
+				cs.cbLen++
+			}
+		}
+		cs.srv.nodesMu.RUnlock()
+		if useStore {
+			var val []byte
+			var expires int
+			if cs.srv.st.Get(key, func(size int, index int, data []byte, expiry int) (cont bool) {
+				if index == 0 {
+					val = cs.bf.Want(size)
+					expires = toExpires(expiry)
+				}
+				copy(val[index:], data)
+				return
+			}) {
+				err = cs.SendData(val, expires)
+			} else {
+				err = cs.SendData(nil, -1)
+			}
+		} else {
+			cb := <-cs.cb
+			cs.cbLen--
+			if kv, ok := cb.(keyVal); ok {
+				err = cs.SendData(kv.Val, kv.Expires)
+			} else {
+				err = cs.SendData(nil, -1)
+			}
 		}
 		if err != nil {
+			for cs.cbLen > 0 {
+				<-cs.cb
+				cs.cbLen--
+			}
 			panic(err)
 		}
 	}
@@ -448,7 +494,7 @@ func (cs *connState) cmddataSet(count int, index int, data []byte, expires int) 
 	var err error
 	key := cs.rCmd.Args[index]
 	if key != "" {
-		var storeSet bool
+		var useStore bool
 		var f func(size int, index int, data []byte, expiry int) (cont bool)
 		for {
 			cs.srv.nodesMu.RLock()
@@ -460,7 +506,7 @@ func (cs *connState) cmddataSet(count int, index int, data []byte, expires int) 
 			}
 		}
 		if cs.standalone {
-			storeSet = true
+			useStore = true
 		} else {
 			cs.allocRespNodes()
 			wrh.ResponsibleNodes(cs.srv.nodes, []byte(key), cs.respNodes)
@@ -474,7 +520,7 @@ func (cs *connState) cmddataSet(count int, index int, data []byte, expires int) 
 					mergedRespNodes = wrh.MergeNodes(cs.respNodes, cs.respNodes2, make([]wrh.Node, 0, len(cs.respNodes)+len(cs.respNodes2)))
 				}
 				var val []byte
-				storeSet = true
+				useStore = true
 				f = func(size int, index int, data []byte, expiry int) (cont bool) {
 					if index == 0 {
 						val = make([]byte, size)
@@ -520,7 +566,7 @@ func (cs *connState) cmddataSet(count int, index int, data []byte, expires int) 
 				}
 			}
 		}
-		if storeSet {
+		if useStore {
 			expiry := toExpiry(expires)
 			switch cs.rCmd.Name {
 			case "SET":

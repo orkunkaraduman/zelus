@@ -9,7 +9,7 @@ import (
 	"github.com/orkunkaraduman/zelus/pkg/client"
 )
 
-type setQueue struct {
+type queue struct {
 	mu                          sync.RWMutex
 	addr                        string
 	connectTimeout, pingTimeout time.Duration
@@ -26,11 +26,11 @@ type setQueue struct {
 	workerClosedCh              chan struct{}
 }
 
-var errSetQueueRemoteSet = errors.New("remote SET error")
+var errQueueRemote = errors.New("remote error")
 
-func NewSetQueue(addr string, connectTimeout, pingTimeout time.Duration, connectRetryCount int, maxLen, maxSize int,
-	cmdName string, standalone bool) (sq *setQueue) {
-	sq = &setQueue{
+func newQueue(addr string, connectTimeout, pingTimeout time.Duration, connectRetryCount int, maxLen, maxSize int,
+	cmdName string, standalone bool) (q *queue) {
+	q = &queue{
 		addr:              addr,
 		connectTimeout:    connectTimeout,
 		pingTimeout:       pingTimeout,
@@ -44,63 +44,66 @@ func NewSetQueue(addr string, connectTimeout, pingTimeout time.Duration, connect
 		workerCloseCh:     make(chan struct{}, 1),
 		workerClosedCh:    make(chan struct{}),
 	}
-	if sq.maxLen < 0 {
-		sq.maxLen = 0
+	if q.maxLen < 0 {
+		q.maxLen = 0
 	}
-	if sq.maxSize < 0 {
-		sq.maxSize = 0
+	if q.maxSize < 0 {
+		q.maxSize = 0
 	}
-	sq.qu = make(chan keyVal, sq.maxLen)
-	go sq.pinger()
-	go sq.worker()
+	q.qu = make(chan keyVal, q.maxLen)
+	go q.pinger()
+	go q.worker()
 	return
 }
 
-func (sq *setQueue) Close() {
+func (q *queue) Close() {
 	select {
-	case sq.pingerCloseCh <- struct{}{}:
+	case q.pingerCloseCh <- struct{}{}:
 	default:
 	}
-	<-sq.pingerClosedCh
+	<-q.pingerClosedCh
 	select {
-	case sq.workerCloseCh <- struct{}{}:
+	case q.workerCloseCh <- struct{}{}:
 	default:
 	}
-	<-sq.workerClosedCh
-	if sq.cl != nil {
-		sq.cl.Close()
+	<-q.workerClosedCh
+	if q.cl != nil {
+		q.cl.Close()
 	}
 }
 
-func (sq *setQueue) checkClient() (err error) {
-	if sq.cl != nil && !sq.cl.IsClosed() {
+func (q *queue) checkClient() (err error) {
+	q.mu.Lock()
+	if q.cl != nil && !q.cl.IsClosed() {
+		q.mu.Unlock()
 		return
 	}
-	sq.cl = nil
-	for i := 0; sq.cl == nil && i < sq.connectRetryCount; i++ {
-		sq.cl, err = client.New("tcp", sq.addr, sq.connectTimeout, sq.pingTimeout)
+	err = errors.New("client closed")
+	for i := 0; err != nil && i < q.connectRetryCount; i++ {
+		q.cl, err = client.New("tcp", q.addr, q.connectTimeout, q.pingTimeout)
 	}
-	if err == nil && sq.standalone {
-		err = sq.cl.Standalone()
+	if err == nil && q.standalone {
+		err = q.cl.Standalone()
 	}
 	if err != nil {
-		sq.cl = nil
+		q.cl = nil
 	}
+	q.mu.Unlock()
 	return
 }
 
-func (sq *setQueue) pinger() {
+func (q *queue) pinger() {
 	tk := time.NewTicker(15 * time.Second)
 	for {
 		done := false
 		select {
 		case <-tk.C:
-			sq.mu.RLock()
-			if sq.cl != nil {
-				sq.cl.Ping()
+			q.mu.RLock()
+			if q.cl != nil {
+				q.cl.Ping()
 			}
-			sq.mu.RUnlock()
-		case <-sq.pingerCloseCh:
+			q.mu.RUnlock()
+		case <-q.pingerCloseCh:
 			done = true
 		}
 		if done {
@@ -108,18 +111,18 @@ func (sq *setQueue) pinger() {
 		}
 	}
 	tk.Stop()
-	close(sq.pingerClosedCh)
+	close(q.pingerClosedCh)
 }
 
-func (sq *setQueue) worker() {
+func (q *queue) worker() {
 	multi := 128
 	keys := make([]string, 0, multi)
 	kvs := make([]keyVal, 0, multi)
 	for {
 		done := false
 		select {
-		case kv := <-sq.qu:
-			l := len(sq.qu) + 1
+		case kv := <-q.qu:
+			l := len(q.qu) + 1
 			if l > multi {
 				l = multi
 			}
@@ -128,26 +131,36 @@ func (sq *setQueue) worker() {
 			keys[0] = kv.Key
 			kvs[0] = kv
 			for i := 1; i < l; i++ {
-				kv := <-sq.qu
+				kv := <-q.qu
 				keys[i] = kv.Key
 				kvs[i] = kv
 			}
-			sq.mu.Lock()
-			e := sq.checkClient()
-			sq.mu.Unlock()
+			e := q.checkClient()
 			if e == nil {
 				var k []string
-				switch sq.cmdName {
+				switch q.cmdName {
+				case "GET":
+					k = make([]string, 0, len(keys))
+					e = q.cl.Get(keys, func(index int, key string, val []byte, expires int) {
+						if val != nil {
+							k = append(k, key)
+							kvs[index].Val = make([]byte, len(val))
+							copy(kvs[index].Val, val)
+						} else {
+							kvs[index].Val = nil
+						}
+						kvs[index].Expires = expires
+					})
 				case "SET":
-					k, e = sq.cl.Set(keys, func(index int, key string) (val []byte, expires2 int) {
+					k, e = q.cl.Set(keys, func(index int, key string) (val []byte, expires int) {
 						return kvs[index].Val, kvs[index].Expires
 					})
 				case "PUT":
-					k, e = sq.cl.Put(keys, func(index int, key string) (val []byte, expires2 int) {
+					k, e = q.cl.Put(keys, func(index int, key string) (val []byte, expires int) {
 						return kvs[index].Val, kvs[index].Expires
 					})
 				case "APPEND":
-					k, e = sq.cl.Append(keys, func(index int, key string) (val []byte, expires2 int) {
+					k, e = q.cl.Append(keys, func(index int, key string) (val []byte, expires int) {
 						return kvs[index].Val, kvs[index].Expires
 					})
 				default:
@@ -155,39 +168,40 @@ func (sq *setQueue) worker() {
 				}
 				if e == nil {
 					i, j := 0, len(k)
-					for _, kv := range kvs {
-						if i >= j || k[i] != kv.Key {
-							sq.remove(kv, errSetQueueRemoteSet)
+					for idx := range kvs {
+						if i >= j || k[i] != kvs[idx].Key {
+							q.remove(kvs[idx], errQueueRemote)
 							continue
 						}
-						sq.remove(kv, nil)
+						q.remove(kv, kvs[idx])
+						kvs[idx].Val = nil
 						i++
 					}
 				}
 			}
 			if e != nil {
 				for _, kv := range kvs {
-					sq.remove(kv, e)
+					q.remove(kv, e)
 				}
 			}
-		case <-sq.workerCloseCh:
+		case <-q.workerCloseCh:
 			done = true
 		}
 		if done {
 			break
 		}
 	}
-	close(sq.workerClosedCh)
+	close(q.workerClosedCh)
 }
 
-func (sq *setQueue) remove(kv keyVal, e error) {
+func (sq *queue) remove(kv keyVal, cb interface{}) {
 	atomic.AddInt64(&sq.quSize, int64(-len(kv.Val)))
 	if kv.CallBack != nil {
-		kv.CallBack <- e
+		kv.CallBack <- cb
 	}
 }
 
-func (sq *setQueue) Add(kv keyVal) {
+func (sq *queue) Add(kv keyVal) {
 	for sq.maxSize > 0 && sq.quSize > int64(sq.maxSize) {
 		time.Sleep(5 * time.Millisecond)
 	}
