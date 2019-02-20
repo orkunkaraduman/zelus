@@ -5,10 +5,10 @@ import (
 	"io"
 	"net"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/orkunkaraduman/zelus/pkg/buffer"
-	"github.com/orkunkaraduman/zelus/pkg/client"
 	"github.com/orkunkaraduman/zelus/pkg/protocol"
 	"github.com/orkunkaraduman/zelus/pkg/wrh"
 )
@@ -18,6 +18,12 @@ type connState struct {
 	conn net.Conn
 	*protocol.Protocol
 	bf *buffer.Buffer
+
+	standalone bool
+	cb         chan interface{}
+	cbLen      int
+	respNodes  []wrh.Node
+	respNodes2 []wrh.Node
 
 	rCmd protocol.Cmd
 }
@@ -31,8 +37,8 @@ Slot Count: %s
 `
 
 const connectTimeout = 1 * time.Second
-const connectRetryCount = 3
 const pingTimeout = 1 * time.Second
+const connectRetryCount = 3
 
 func newConnState(srv *Server, conn net.Conn) (cs *connState) {
 	cs = &connState{
@@ -40,28 +46,38 @@ func newConnState(srv *Server, conn net.Conn) (cs *connState) {
 		conn:     conn,
 		Protocol: protocol.New(conn, conn),
 		bf:       buffer.New(),
+		cb:       make(chan interface{}, 128),
 	}
 	return
 }
 
-func (cs *connState) getNode(addr string) (cl *client.Client) {
-	cl = cs.srv.nodePool.Get("tcp", addr)
-	if cl != nil {
-		return
+func (cs *connState) allocRespNodes() {
+	var u uint
+	u = 1 + cs.srv.nodeBackups
+	if uint(len(cs.respNodes)) < u {
+		cs.respNodes = make([]wrh.Node, u)
 	}
-	for i := 0; cl == nil && i < connectRetryCount; i++ {
-		cl, _ = client.New("tcp", addr, connectTimeout, pingTimeout)
+	cs.respNodes = cs.respNodes[:u]
+	u = 1 + cs.srv.nodeBackups2
+	if uint(len(cs.respNodes2)) < u {
+		cs.respNodes2 = make([]wrh.Node, u)
 	}
-	return
-}
-
-func (cs *connState) putNode(cl *client.Client) {
-	cs.srv.nodePool.Put(cl)
+	cs.respNodes2 = cs.respNodes2[:u]
 }
 
 func (cs *connState) cmdPing() (count int) {
 	var err error
 	err = cs.SendCmd(protocol.Cmd{Name: "PONG"})
+	if err != nil {
+		panic(err)
+	}
+	return
+}
+
+func (cs *connState) cmdStandalone() (count int) {
+	var err error
+	cs.standalone = true
+	err = cs.SendCmd(protocol.Cmd{Name: "STANDALONE"})
 	if err != nil {
 		panic(err)
 	}
@@ -99,10 +115,12 @@ func (cs *connState) cmdStats() (count int) {
 }
 
 const (
-	serrCmdClusterArgCount = "invalid argument count"
+	serrCmdClusterArgCount     = "invalid argument count"
+	serrCmdClusterInvalidState = "invalid state"
+	serrCmdClusterCannotSet    = "can not set to another node"
 )
 
-func (cs *connState) cmdCluster() (count int) {
+func (cs *connState) cmdClusterInit() (count int) {
 	var err error
 	if len(cs.rCmd.Args) < 2 {
 		err = cs.SendCmd(protocol.Cmd{Name: "ERROR", Args: []string{serrCmdClusterArgCount}})
@@ -112,6 +130,7 @@ func (cs *connState) cmdCluster() (count int) {
 		return
 	}
 	cs.srv.nodesMu.Lock()
+	cs.srv.clusterState = clusterStateNormal
 	var u uint64
 	u, err = strconv.ParseUint(cs.rCmd.Args[0], 10, 32)
 	if err != nil {
@@ -124,29 +143,14 @@ func (cs *connState) cmdCluster() (count int) {
 	}
 	cs.srv.nodeBackups = uint(u)
 	cs.srv.nodeBackups2 = uint(u)
-	for _, addr := range cs.srv.nodeAddrs {
-		for {
-			cl := cs.srv.nodePool.Get("tcp", addr)
-			if cl == nil {
-				break
-			}
-			cl.Close()
-		}
-	}
-	cs.srv.nodeAddrs = make(map[uint32]string, 4)
-	for _, addr := range cs.srv.nodeAddrs2 {
-		for {
-			cl := cs.srv.nodePool.Get("tcp", addr)
-			if cl == nil {
-				break
-			}
-			cl.Close()
-		}
-	}
-	cs.srv.nodeAddrs2 = make(map[uint32]string, 4)
 	nodeCount := (len(cs.rCmd.Args) - 2) / 2
+	args := make([]string, 0, nodeCount)
 	cs.srv.nodes = make([]wrh.Node, 0, nodeCount)
 	cs.srv.nodes2 = make([]wrh.Node, 0, nodeCount*2)
+	for _, q := range cs.srv.nodeQueueGroups {
+		q.Close()
+	}
+	cs.srv.nodeQueueGroups = make(map[uint32]*queueGroup, nodeCount*2)
 	for i := 0; i < nodeCount; i++ {
 		idx := 2 + i*2
 		var u uint64
@@ -156,7 +160,7 @@ func (cs *connState) cmdCluster() (count int) {
 		}
 		id := uint32(u)
 		addr := cs.rCmd.Args[idx+1]
-		if _, ok := cs.srv.nodeAddrs[id]; ok {
+		if wrh.FindSeed(cs.srv.nodes2, id) >= 0 {
 			continue
 		}
 		nd := wrh.Node{
@@ -165,14 +169,9 @@ func (cs *connState) cmdCluster() (count int) {
 		}
 		cs.srv.nodes = append(cs.srv.nodes, nd)
 		cs.srv.nodes2 = append(cs.srv.nodes2, nd)
-		cs.srv.nodeAddrs[id] = addr
-		cs.srv.nodeAddrs2[id] = addr
-	}
-	args := make([]string, 0, nodeCount)
-	for id, addr := range cs.srv.nodeAddrs {
+		cs.srv.nodeQueueGroups[id] = newQueueGroup(addr, connectTimeout, pingTimeout, connectRetryCount, 1024, 1024*1024)
 		args = append(args, strconv.FormatUint(uint64(id), 10), addr)
 	}
-	cs.srv.clustered = true
 	cs.srv.nodesMu.Unlock()
 	err = cs.SendCmd(protocol.Cmd{Name: "OK", Args: args})
 	if err != nil {
@@ -181,9 +180,17 @@ func (cs *connState) cmdCluster() (count int) {
 	return
 }
 
-func (cs *connState) cmdNodeadd() (count int) {
+func (cs *connState) cmdClusterNodeadd() (count int) {
 	var err error
 	cs.srv.nodesMu.Lock()
+	if cs.srv.clusterState != clusterStateNormal {
+		cs.srv.nodesMu.Unlock()
+		err = cs.SendCmd(protocol.Cmd{Name: "ERROR", Args: []string{serrCmdClusterInvalidState}})
+		if err != nil {
+			panic(err)
+		}
+		return
+	}
 	nodeCount := len(cs.rCmd.Args) / 2
 	args := make([]string, 0, nodeCount)
 	for i := 0; i < nodeCount; i++ {
@@ -203,9 +210,12 @@ func (cs *connState) cmdNodeadd() (count int) {
 			Weight: 1.0,
 		}
 		cs.srv.nodes2 = append(cs.srv.nodes2, nd)
-		cs.srv.nodeAddrs2[id] = addr
+		if _, ok := cs.srv.nodeQueueGroups[id]; !ok {
+			cs.srv.nodeQueueGroups[id] = newQueueGroup(addr, connectTimeout, pingTimeout, connectRetryCount, 1024, 1024*1024)
+		} else {
+			cs.srv.nodeQueueGroups[id].remove = false
+		}
 		args = append(args, strconv.FormatUint(uint64(id), 10), addr)
-		cs.srv.reshardNeed = true
 	}
 	cs.srv.nodesMu.Unlock()
 	err = cs.SendCmd(protocol.Cmd{Name: "OK", Args: args})
@@ -215,9 +225,17 @@ func (cs *connState) cmdNodeadd() (count int) {
 	return
 }
 
-func (cs *connState) cmdNoderm() (count int) {
+func (cs *connState) cmdClusterNoderm() (count int) {
 	var err error
 	cs.srv.nodesMu.Lock()
+	if cs.srv.clusterState != clusterStateNormal {
+		cs.srv.nodesMu.Unlock()
+		err = cs.SendCmd(protocol.Cmd{Name: "ERROR", Args: []string{serrCmdClusterInvalidState}})
+		if err != nil {
+			panic(err)
+		}
+		return
+	}
 	nodeCount := len(cs.rCmd.Args)
 	args := make([]string, 0, nodeCount)
 	for i := 0; i < nodeCount; i++ {
@@ -232,9 +250,8 @@ func (cs *connState) cmdNoderm() (count int) {
 			continue
 		}
 		cs.srv.nodes2 = cs.srv.nodes2[:ndIdx2+copy(cs.srv.nodes2[ndIdx2:], cs.srv.nodes2[ndIdx2+1:])]
-		delete(cs.srv.nodeAddrs2, id)
+		cs.srv.nodeQueueGroups[id].remove = true
 		args = append(args, strconv.FormatUint(uint64(id), 10))
-		cs.srv.reshardNeed = true
 	}
 	cs.srv.nodesMu.Unlock()
 	err = cs.SendCmd(protocol.Cmd{Name: "OK", Args: args})
@@ -244,61 +261,57 @@ func (cs *connState) cmdNoderm() (count int) {
 	return
 }
 
-const (
-	serrCmdReshardDoesnotNeed   = "reshard does not need"
-	serrCmdReshardCannotConnect = "can not connect to another node"
-	serrCmdReshardCannotSet     = "can not set to another node"
-)
-
-func (cs *connState) cmdReshard() (count int) {
+func (cs *connState) cmdClusterReshard() (count int) {
 	cs.srv.reshardMu.Lock()
 	var err error
+	cs.srv.nodesMu.Lock()
+	if cs.srv.clusterState != clusterStateReshardWait {
+		cs.srv.nodesMu.Unlock()
+		cs.srv.reshardMu.Unlock()
+		err = cs.SendCmd(protocol.Cmd{Name: "ERROR", Args: []string{serrCmdClusterInvalidState}})
+		if err != nil {
+			panic(err)
+		}
+		return
+	}
+	cs.srv.clusterState = clusterStateReshard
+	cs.srv.nodesMu.Unlock()
 	cs.srv.nodesMu.RLock()
+	cs.allocRespNodes()
 	var serr []string
-	if cs.srv.reshardNeed {
-		bf := buffer.New()
-		var val []byte
-		respNodes := make([]wrh.Node, 1+cs.srv.nodeBackups)
-		respNodes2 := make([]wrh.Node, 1+cs.srv.nodeBackups2)
-		cs.srv.st.Scan(func(key string, size int, index int, data []byte, expiry int) (cont bool) {
-			if index == 0 {
-				val = bf.Want(size)
-			}
-			n := copy(val[index:], data)
-			if index+n >= size {
-				wrh.ResponsibleNodes(cs.srv.nodes, []byte(key), respNodes)
-				wrh.ResponsibleNodes(cs.srv.nodes2, []byte(key), respNodes2)
-				if wrh.MaxSeed(respNodes) == cs.srv.nodeID {
-					for i, j := 0, len(respNodes2); i < j; i++ {
-						id := respNodes2[i].Seed
-						if id == cs.srv.nodeID {
-							continue
-						}
-						addr := cs.srv.nodeAddrs2[id]
-						cl := cs.getNode(addr)
-						if cl == nil {
-							serr = []string{serrCmdReshardCannotConnect, strconv.FormatUint(uint64(id), 10), addr}
-							return false
-						}
-						k, _ := cl.Set([]string{key}, func(index int, key string) ([]byte, int) {
-							return val, toExpires(expiry)
-						})
-						cs.putNode(cl)
-						if len(k) < 1 {
-							serr = []string{serrCmdReshardCannotSet, strconv.FormatUint(uint64(id), 10), addr}
-							return false
-						}
+	bf := buffer.New()
+	var val []byte
+	cs.srv.st.Scan(func(key string, size int, index int, data []byte, expiry int) (cont bool) {
+		if index == 0 {
+			val = bf.Want(size)
+		}
+		if index+copy(val[index:], data) >= size {
+			wrh.ResponsibleNodes(cs.srv.nodes, []byte(key), cs.respNodes)
+			wrh.ResponsibleNodes(cs.srv.nodes2, []byte(key), cs.respNodes2)
+			if wrh.MaxSeed(cs.respNodes) == cs.srv.nodeID {
+				for i, j := 0, len(cs.respNodes2); i < j; i++ {
+					id := cs.respNodes2[i].Seed
+					if id == cs.srv.nodeID {
+						continue
+					}
+					q := cs.srv.nodeQueueGroups[id]
+					kv := KeyVal{
+						Key:      key,
+						Val:      val,
+						Expires:  toExpires(expiry),
+						CallBack: cs.cb,
+					}
+					q.nodeSetQueue.Add(kv)
+					e, _ := (<-cs.cb).(error)
+					if e != nil {
+						serr = []string{serrCmdClusterCannotSet, strconv.FormatUint(uint64(id), 10), q.addr}
+						return false
 					}
 				}
-				if wrh.FindSeed(respNodes2, cs.srv.nodeID) < 0 {
-					go cs.srv.st.Del(key)
-				}
 			}
-			return true
-		})
-	} else {
-		serr = []string{serrCmdReshardDoesnotNeed}
-	}
+		}
+		return true
+	})
 	cs.srv.nodesMu.RUnlock()
 	if serr != nil {
 		cs.srv.reshardMu.Unlock()
@@ -308,20 +321,74 @@ func (cs *connState) cmdReshard() (count int) {
 		}
 		return
 	}
+	cs.srv.reshardMu.Unlock()
+	err = cs.SendCmd(protocol.Cmd{Name: "OK"})
+	if err != nil {
+		panic(err)
+	}
+	return
+}
+
+func (cs *connState) cmdClusterClean() (count int) {
+	var err error
 	cs.srv.nodesMu.Lock()
+	if cs.srv.clusterState != clusterStateCleanWait {
+		cs.srv.nodesMu.Unlock()
+		err = cs.SendCmd(protocol.Cmd{Name: "ERROR", Args: []string{serrCmdClusterInvalidState}})
+		if err != nil {
+			panic(err)
+		}
+		return
+	}
+	cs.srv.clusterState = clusterStateClean
+	cs.srv.nodeBackups = cs.srv.nodeBackups2
 	cs.srv.nodes = cs.srv.nodes2
 	cs.srv.nodes2 = make([]wrh.Node, 0, len(cs.srv.nodes)*2)
 	for i := range cs.srv.nodes {
 		cs.srv.nodes2 = append(cs.srv.nodes2, cs.srv.nodes[i])
 	}
-	cs.srv.nodeAddrs = cs.srv.nodeAddrs2
-	cs.srv.nodeAddrs2 = make(map[uint32]string, len(cs.srv.nodeAddrs)*2)
-	for i := range cs.srv.nodeAddrs {
-		cs.srv.nodeAddrs2[i] = cs.srv.nodeAddrs[i]
+	for i, q := range cs.srv.nodeQueueGroups {
+		if q.remove {
+			q.Close()
+			delete(cs.srv.nodeQueueGroups, i)
+		}
 	}
-	cs.srv.reshardNeed = false
 	cs.srv.nodesMu.Unlock()
-	cs.srv.reshardMu.Unlock()
+	cs.srv.nodesMu.RLock()
+	cs.allocRespNodes()
+	cs.srv.st.Scan(func(key string, size int, index int, data []byte, expiry int) (cont bool) {
+		if index+len(data) >= size {
+			wrh.ResponsibleNodes(cs.srv.nodes2, []byte(key), cs.respNodes2)
+			if wrh.FindSeed(cs.respNodes2, cs.srv.nodeID) < 0 {
+				go cs.srv.st.Del(key)
+			}
+		}
+		return true
+	})
+	cs.srv.nodesMu.RUnlock()
+	cs.srv.nodesMu.Lock()
+	cs.srv.clusterState = clusterStateNormal
+	cs.srv.nodesMu.Unlock()
+	err = cs.SendCmd(protocol.Cmd{Name: "OK"})
+	if err != nil {
+		panic(err)
+	}
+	return
+}
+
+func (cs *connState) cmdClusterWait() (count int) {
+	var err error
+	cs.srv.nodesMu.Lock()
+	if cs.srv.clusterState != clusterStateNormal && cs.srv.clusterState != clusterStateReshard {
+		cs.srv.nodesMu.Unlock()
+		err = cs.SendCmd(protocol.Cmd{Name: "ERROR", Args: []string{serrCmdClusterInvalidState}})
+		if err != nil {
+			panic(err)
+		}
+		return
+	}
+	cs.srv.clusterState++
+	cs.srv.nodesMu.Unlock()
 	err = cs.SendCmd(protocol.Cmd{Name: "OK"})
 	if err != nil {
 		panic(err)
@@ -382,37 +449,101 @@ func (cs *connState) cmddataSet(count int, index int, data []byte, expires int) 
 	expiry := toExpiry(expires)
 	key := cs.rCmd.Args[index]
 	if key != "" {
-		var val []byte
-		f := func(size int, index int, data []byte, expiry int) (cont bool) {
-			if !cs.srv.clustered {
-				return false
-			}
-			if index == 0 {
-				val = make([]byte, size)
-			}
-			copy(val[index:], data)
-			/*if index+copy(val[index:], data) >= size {
-			}*/
-			return true
-		}
-		switch cs.rCmd.Name {
-		case "SET":
-			if !cs.srv.st.Set(key, data, expiry, f) {
-				cs.rCmd.Args[index] = ""
-			}
-		case "PUT":
-			if !cs.srv.st.Put(key, data, expiry, f) {
-				cs.rCmd.Args[index] = ""
-			}
-		case "APPEND":
-			if !cs.srv.st.Append(key, data, expiry, f) {
-				cs.rCmd.Args[index] = ""
+		var storeSet bool
+		var f func(size int, index int, data []byte, expiry int) (cont bool)
+		for {
+			cs.srv.nodesMu.RLock()
+			if cs.srv.clusterState == clusterStateReshardWait || cs.srv.clusterState == clusterStateCleanWait {
+				cs.srv.nodesMu.RUnlock()
+				time.Sleep(5 * time.Millisecond)
+			} else {
+				break
 			}
 		}
-		//cs.srv.nodesMu.RLock()
-		//cs.srv.nodesMu.RUnlock()
+		if cs.standalone {
+			storeSet = true
+		} else {
+			cs.allocRespNodes()
+			wrh.ResponsibleNodes(cs.srv.nodes, []byte(key), cs.respNodes)
+			masterID := wrh.MaxSeed(cs.respNodes)
+			if masterID == cs.srv.nodeID {
+				var mergedRespNodes []wrh.Node
+				if cs.srv.clusterState != clusterStateReshard {
+					mergedRespNodes = cs.respNodes
+				} else {
+					wrh.ResponsibleNodes(cs.srv.nodes2, []byte(key), cs.respNodes2)
+					mergedRespNodes = wrh.MergeNodes(cs.respNodes, cs.respNodes2, make([]wrh.Node, 0, len(cs.respNodes)+len(cs.respNodes2)))
+				}
+				var val []byte
+				storeSet = true
+				f = func(size int, index int, data []byte, expiry int) (cont bool) {
+					if index == 0 {
+						val = make([]byte, size)
+					}
+					if index+copy(val[index:], data) >= size {
+						for i, j := 0, len(mergedRespNodes); i < j; i++ {
+							id := mergedRespNodes[i].Seed
+							if id == cs.srv.nodeID {
+								continue
+							}
+							q := cs.srv.nodeQueueGroups[id]
+							kv := KeyVal{
+								Key:      key,
+								Val:      val,
+								Expires:  toExpires(expiry),
+								CallBack: cs.cb,
+							}
+							q.nodeSetQueue.Add(kv)
+							cs.cbLen++
+						}
+					}
+					return true
+				}
+			} else {
+				id := masterID
+				q := cs.srv.nodeQueueGroups[id]
+				kv := KeyVal{
+					Key:      key,
+					Val:      data,
+					Expires:  toExpires(expiry),
+					CallBack: cs.cb,
+				}
+				switch cs.rCmd.Name {
+				case "SET":
+					q.masterSetQueue.Add(kv)
+					cs.cbLen++
+				case "PUT":
+					q.masterPutQueue.Add(kv)
+					cs.cbLen++
+				case "APPEND":
+					q.masterAppendQueue.Add(kv)
+					cs.cbLen++
+				}
+			}
+		}
+		if storeSet {
+			switch cs.rCmd.Name {
+			case "SET":
+				if !cs.srv.st.Set(key, data, expiry, f) {
+					cs.rCmd.Args[index] = ""
+				}
+			case "PUT":
+				if !cs.srv.st.Put(key, data, expiry, f) {
+					cs.rCmd.Args[index] = ""
+				}
+			case "APPEND":
+				if !cs.srv.st.Append(key, data, expiry, f) {
+					cs.rCmd.Args[index] = ""
+				}
+			}
+		}
+		cs.srv.nodesMu.RUnlock()
 	}
 	if index+1 >= count {
+		for cs.cbLen > 0 {
+			<-cs.cb
+			cs.cbLen--
+		}
 		keys := make([]string, 0, len(cs.rCmd.Args))
 		for _, key := range cs.rCmd.Args {
 			if key == "" {
@@ -456,20 +587,33 @@ func (cs *connState) OnReadCmd(cmd protocol.Cmd) (count int) {
 	if cs.rCmd.Name == "PING" {
 		return cs.cmdPing()
 	}
+	if cs.rCmd.Name == "STANDALONE" {
+		return cs.cmdStandalone()
+	}
 	if cs.rCmd.Name == "STATS" {
 		return cs.cmdStats()
 	}
-	if cs.rCmd.Name == "CLUSTER" {
-		return cs.cmdCluster()
-	}
-	if cs.rCmd.Name == "NODEADD" {
-		return cs.cmdNodeadd()
-	}
-	if cs.rCmd.Name == "NODERM" {
-		return cs.cmdNoderm()
-	}
-	if cs.rCmd.Name == "RESHARD" {
-		return cs.cmdReshard()
+	if cs.rCmd.Name == "CLUSTER" && len(cs.rCmd.Args) >= 1 {
+		switch strings.ToUpper(cs.rCmd.Args[0]) {
+		case "INIT":
+			cs.rCmd.Args = cs.rCmd.Args[1:]
+			return cs.cmdClusterInit()
+		case "NODEADD":
+			cs.rCmd.Args = cs.rCmd.Args[1:]
+			return cs.cmdClusterNodeadd()
+		case "NODERM":
+			cs.rCmd.Args = cs.rCmd.Args[1:]
+			return cs.cmdClusterNoderm()
+		case "RESHARD":
+			cs.rCmd.Args = cs.rCmd.Args[1:]
+			return cs.cmdClusterReshard()
+		case "CLEAN":
+			cs.rCmd.Args = cs.rCmd.Args[1:]
+			return cs.cmdClusterClean()
+		case "WAIT":
+			cs.rCmd.Args = cs.rCmd.Args[1:]
+			return cs.cmdClusterWait()
+		}
 	}
 	if cs.rCmd.Name == "GET" {
 		return cs.cmdGet()

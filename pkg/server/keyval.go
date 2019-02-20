@@ -1,7 +1,8 @@
 package server
 
-type keyVal struct {
-	Key    string
-	Val    []byte
-	Expiry int
+type KeyVal struct {
+	Key      string
+	Val      []byte
+	Expires  int
+	CallBack chan interface{}
 }

@@ -8,7 +8,6 @@ import (
 	"sync"
 
 	accepter "github.com/orkunkaraduman/go-accepter"
-	"github.com/orkunkaraduman/zelus/pkg/client"
 	"github.com/orkunkaraduman/zelus/pkg/store"
 	"github.com/orkunkaraduman/zelus/pkg/wrh"
 )
@@ -17,19 +16,25 @@ type Server struct {
 	st *store.Store
 	ac *accepter.Accepter
 
-	nodePool     *client.Pool
-	nodesMu      sync.RWMutex
-	clustered    bool
-	nodeID       uint32
-	nodeBackups  uint
-	nodeBackups2 uint
-	nodes        []wrh.Node
-	nodes2       []wrh.Node
-	nodeAddrs    map[uint32]string
-	nodeAddrs2   map[uint32]string
-	reshardNeed  bool
-	reshardMu    sync.Mutex
+	nodesMu         sync.RWMutex
+	clusterState    int
+	nodeID          uint32
+	nodeBackups     uint
+	nodeBackups2    uint
+	nodes           []wrh.Node
+	nodes2          []wrh.Node
+	nodeQueueGroups map[uint32]*queueGroup
+	reshardMu       sync.Mutex
 }
+
+const (
+	clusterStateNonclustered = iota
+	clusterStateNormal
+	clusterStateReshardWait
+	clusterStateReshard
+	clusterStateCleanWait
+	clusterStateClean
+)
 
 var (
 	ConnBufferSize = 0
@@ -41,7 +46,6 @@ func New(st *store.Store) (srv *Server) {
 		ac: &accepter.Accepter{
 			ErrorLog: log.New(os.Stderr, "", log.LstdFlags),
 		},
-		nodePool: client.NewPool(1024),
 	}
 	srv.ac.Handler = accepter.HandlerFunc(srv.serve)
 	return
@@ -56,12 +60,10 @@ func (srv *Server) TCPListenAndServe(addr string) error {
 }
 
 func (srv *Server) Shutdown(ctx context.Context) error {
-	srv.nodePool.Close()
 	return srv.ac.Shutdown(ctx)
 }
 
 func (srv *Server) Close() error {
-	srv.nodePool.Close()
 	return srv.ac.Close()
 }
 

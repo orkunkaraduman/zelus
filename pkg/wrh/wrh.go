@@ -57,27 +57,19 @@ func MaxSeed(nodes []Node) uint32 {
 	return max
 }
 
-func MergeNodes(nodes1, nodes2 []Node, mergedNodes []Node) (r int) {
-	l := len(mergedNodes)
+func MergeNodes(nodes1, nodes2 []Node, mergedNodesIn []Node) (mergedNodes []Node) {
+	mergedNodes = mergedNodesIn
 	for i := range nodes1 {
-		if r >= l {
-			return
-		}
-		if FindSeed(mergedNodes[:r], nodes1[i].Seed) >= 0 {
+		if FindSeed(mergedNodes, nodes1[i].Seed) >= 0 {
 			continue
 		}
-		mergedNodes[r] = nodes1[i]
-		r++
+		mergedNodes = append(mergedNodes, nodes1[i])
 	}
 	for i := range nodes2 {
-		if r >= l {
-			return
-		}
-		if FindSeed(mergedNodes[:r], nodes2[i].Seed) >= 0 {
+		if FindSeed(mergedNodes, nodes2[i].Seed) >= 0 {
 			continue
 		}
-		mergedNodes[r] = nodes2[i]
-		r++
+		mergedNodes = append(mergedNodes, nodes2[i])
 	}
 	return
 }
