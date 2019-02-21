@@ -18,7 +18,6 @@ type connState struct {
 	srv  *Server
 	conn net.Conn
 	*protocol.Protocol
-	bf *buffer.Buffer
 
 	standalone bool
 	cb         chan interface{}
@@ -46,7 +45,6 @@ func newConnState(srv *Server, conn net.Conn) (cs *connState) {
 		srv:      srv,
 		conn:     conn,
 		Protocol: protocol.New(conn, conn),
-		bf:       buffer.New(),
 		cb:       make(chan interface{}, 1024),
 	}
 	return
@@ -435,7 +433,7 @@ func (cs *connState) cmdGet() (count int) {
 				break
 			}
 		}
-		if cs.standalone {
+		if cs.srv.clusterState == clusterStateNonclustered || cs.standalone {
 			useStore = true
 		} else {
 			cs.allocRespNodes()
@@ -462,7 +460,6 @@ func (cs *connState) cmdGet() (count int) {
 			var expires int
 			if cs.srv.st.Get(key, func(size int, index int, data []byte, expiry int) (cont bool) {
 				if index == 0 {
-					//val = cs.bf.Want(size)
 					val = make([]byte, size)
 					expires = toExpires(expiry)
 				}
@@ -521,7 +518,7 @@ func (cs *connState) cmddataSet(count int, index int, data []byte, expires int) 
 				break
 			}
 		}
-		if cs.standalone {
+		if cs.srv.clusterState == clusterStateNonclustered || cs.standalone {
 			useStore = true
 		} else {
 			cs.allocRespNodes()
@@ -579,6 +576,9 @@ func (cs *connState) cmddataSet(count int, index int, data []byte, expires int) 
 				case "APPEND":
 					q.masterAppendQueue.Add(kv)
 					cs.cbLen++
+				case "DEL":
+					q.masterSetQueue.Add(kv)
+					cs.cbLen++
 				}
 			}
 		}
@@ -595,6 +595,10 @@ func (cs *connState) cmddataSet(count int, index int, data []byte, expires int) 
 				}
 			case "APPEND":
 				if !cs.srv.st.Append(key, data, expiry, f) {
+					cs.rCmd.Args[index] = ""
+				}
+			case "DEL":
+				if !cs.srv.st.Set(key, data, expiry, f) {
 					cs.rCmd.Args[index] = ""
 				}
 			}
@@ -622,20 +626,9 @@ func (cs *connState) cmddataSet(count int, index int, data []byte, expires int) 
 }
 
 func (cs *connState) cmdDel() (count int) {
-	var err error
-	keys := make([]string, 0, len(cs.rCmd.Args))
-	for _, key := range cs.rCmd.Args {
-		if key == "" {
-			continue
-		}
-		if !cs.srv.st.Del(key) {
-			continue
-		}
-		keys = append(keys, key)
-	}
-	err = cs.SendCmd(protocol.Cmd{Name: "OK", Args: keys})
-	if err != nil {
-		panic(err)
+	cnt := len(cs.rCmd.Args)
+	for index := range cs.rCmd.Args {
+		cs.cmddataSet(cnt, index, nil, -1)
 	}
 	return
 }
@@ -702,7 +695,6 @@ func (cs *connState) OnReadData(count int, index int, data []byte, expires int) 
 
 func (cs *connState) OnQuit(e error) {
 	defer func() {
-		cs.bf.Close()
 		cs.Flush()
 	}()
 	if e != nil && e != io.EOF {
