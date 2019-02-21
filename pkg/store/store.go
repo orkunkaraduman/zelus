@@ -317,12 +317,14 @@ func (st *Store) Get(key string, f GetFunc) bool {
 	if ndIdx < 0 {
 		sl.Mu.Unlock()
 		st.bucketsMu.RUnlock()
+		atomic.AddInt64(&st.stats.SucOperCount, 1)
 		return false
 	}
 	nd := &sl.Nodes[ndIdx]
 	if nd.Expiry >= 0 && nd.Expiry < int(time.Now().Unix()) {
 		sl.Mu.Unlock()
 		st.bucketsMu.RUnlock()
+		atomic.AddInt64(&st.stats.SucOperCount, 1)
 		return false
 	}
 	p := len(bKey)
@@ -400,6 +402,7 @@ func (st *Store) write(key string, val []byte, ua updateAction, expiry int, f Ge
 			sl.Mu.Unlock()
 			st.bucketsMu.RUnlock()
 			atomic.AddInt64(&st.stats.SucOperCount, 1)
+			st.fixLoadFactor()
 			return true
 		}
 		if !nd.Set(st.slotPool, st.dataPool, bKeyLen+valLen) {
