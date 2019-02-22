@@ -3,16 +3,12 @@ package store
 import (
 	"bytes"
 	"sync"
-	"unsafe"
 )
 
 type slot struct {
 	Mu    sync.Mutex
 	Nodes []node
 }
-
-var zeroSlot slot
-var sizeOfSlot = int(unsafe.Sizeof(zeroSlot))
 
 func (sl *slot) FindNode(keyHash int, bKey []byte) int {
 	bKeyLen := len(bKey)
@@ -54,7 +50,7 @@ func (sl *slot) NewNode(slotPool MemPool) int {
 	if ptr == nil {
 		return -1
 	}
-	newNodes := (*[^uint32(0) >> 1]node)(unsafe.Pointer(&ptr[0]))[:len(ptr)/sizeOfNode]
+	newNodes := toSlice(ptr, len(ptr)/sizeOfNode, typeOfNode).([]node)
 	for i := range newNodes {
 		if i < idx {
 			newNodes[i] = sl.Nodes[i]
@@ -66,7 +62,7 @@ func (sl *slot) NewNode(slotPool MemPool) int {
 		}
 	}
 	if sl.Nodes != nil {
-		slotPool.Free((*[^uint32(0) >> 1]byte)(unsafe.Pointer(&sl.Nodes[0]))[:len(sl.Nodes)*sizeOfNode][:])
+		slotPool.Free(toSlice(sl.Nodes, len(sl.Nodes)*sizeOfNode, typeOfByte).([]byte))
 	}
 	sl.Nodes = newNodes
 	return idx
@@ -84,7 +80,7 @@ func (sl *slot) DelNode(idx int, slotPool MemPool) {
 		}
 	}
 	if sl.Nodes != nil {
-		slotPool.Free((*[^uint32(0) >> 1]byte)(unsafe.Pointer(&sl.Nodes[0]))[:len(sl.Nodes)*sizeOfNode][:])
+		slotPool.Free(toSlice(sl.Nodes, len(sl.Nodes)*sizeOfNode, typeOfByte).([]byte))
 		sl.Nodes = nil
 	}
 }
@@ -100,7 +96,7 @@ func (sl *slot) FreeNode(idx int, slotPool, dataPool MemPool) {
 		}
 	}
 	if sl.Nodes != nil {
-		slotPool.Free((*[^uint32(0) >> 1]byte)(unsafe.Pointer(&sl.Nodes[0]))[:len(sl.Nodes)*sizeOfNode][:])
+		slotPool.Free(toSlice(sl.Nodes, len(sl.Nodes)*sizeOfNode, typeOfByte).([]byte))
 		sl.Nodes = nil
 	}
 }
@@ -111,9 +107,6 @@ type node struct {
 	Size    int
 	Expiry  int
 }
-
-var zeroNode node
-var sizeOfNode = int(unsafe.Sizeof(zeroNode))
 
 func (nd *node) Alloc(slotPool, dataPool MemPool, size int) bool {
 	dataBlockSize := dataPool.BlockSize()
@@ -153,8 +146,6 @@ func (nd *node) Alloc(slotPool, dataPool MemPool, size int) bool {
 		}
 		return false
 	}
-	var zeroData []byte
-	sizeOfData := int(unsafe.Sizeof(zeroData))
 	idx := len(nd.Datas)
 	for idx > 0 && nd.Datas[idx-1] == nil {
 		idx--
@@ -169,7 +160,7 @@ func (nd *node) Alloc(slotPool, dataPool MemPool, size int) bool {
 			}
 			return false
 		}
-		newDatas = (*[^uint32(0) >> 1][]byte)(unsafe.Pointer(&ptr[0]))[:len(ptr)/sizeOfData]
+		newDatas = toSlice(ptr, len(ptr)/sizeOfData, typeOfData).([][]byte)
 		newDatasLen = len(newDatas)
 		for i := 0; i < idx; i++ {
 			newDatas[i] = nd.Datas[i]
@@ -187,7 +178,7 @@ func (nd *node) Alloc(slotPool, dataPool MemPool, size int) bool {
 		}
 	}
 	if nd.Datas != nil && &nd.Datas[0] != &newDatas[0] {
-		slotPool.Free((*[^uint32(0) >> 1]byte)(unsafe.Pointer(&nd.Datas[0]))[:len(nd.Datas)*sizeOfData][:])
+		slotPool.Free(toSlice(nd.Datas, len(nd.Datas)*sizeOfData, typeOfByte).([]byte))
 	}
 	nd.Datas = newDatas
 	nd.Size += size
@@ -215,14 +206,12 @@ func (nd *node) Set(slotPool, dataPool MemPool, size int) bool {
 }
 
 func (nd *node) Free(slotPool, dataPool MemPool) {
-	var zeroData []byte
-	sizeOfData := int(unsafe.Sizeof(zeroData))
 	for i := range nd.Datas {
 		dataPool.Free(nd.Datas[i])
 		nd.Datas[i] = nil
 	}
 	if nd.Datas != nil {
-		slotPool.Free((*[^uint32(0) >> 1]byte)(unsafe.Pointer(&nd.Datas[0]))[:len(nd.Datas)*sizeOfData][:])
+		slotPool.Free(toSlice(nd.Datas, len(nd.Datas)*sizeOfData, typeOfByte).([]byte))
 	}
 	nd.Datas = nil
 	nd.Size = 0

@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/orkunkaraduman/zelus/pkg/malloc"
 	"github.com/orkunkaraduman/zelus/pkg/store"
 )
 
@@ -28,7 +29,7 @@ func set(st *store.Store, start, stop int) {
 	var buf [10 * 4096]byte
 	i, r := 0, false
 	for i = start; i < stop; i++ {
-		r = st.Set(keys[i-start], buf[0:4096])
+		r = st.Set(keys[i-start], buf[0:4096], -1, nil)
 		if !r {
 			break
 		}
@@ -70,8 +71,8 @@ func get(st *store.Store, start, stop int) {
 	fmt.Println(time.Now(), "get start")
 	i, r := 0, true
 	for i = start; i < stop; i++ {
-		p := st.Get(keys[i-start], func(size int, index int, data []byte) {
-
+		p := st.Get(keys[i-start], func(size int, index int, data []byte, expiry int) (cont bool) {
+			return true
 		})
 		if !p {
 			r = false
@@ -100,7 +101,8 @@ func main() {
 	}()
 
 	size := 10 * 1024 * 1024 * 1024
-	st := store.New(2*size/4096, size)
+	mPool := malloc.AllocPool(size)
+	st := store.New(64*1024, 4, mPool, mPool)
 
 	//time.Sleep(10 * time.Second)
 

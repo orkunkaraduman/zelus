@@ -1,6 +1,7 @@
 package main
 
 type memPool struct {
+	p *byte
 }
 
 func (m *memPool) Alloc(size int) []byte {
@@ -13,8 +14,7 @@ func (m *memPool) AllocBlock(size int) []byte {
 	}
 	bs := m.BlockSize()
 	size = bs * (size/bs + 1)
-	//return (*[^uint32(0) >> 1]byte)(unsafe.Pointer(&make([]byte, size)[0]))[:size]
-	return make([]byte, size, 2*size)
+	return make([]byte, size)
 }
 
 func (m *memPool) Free(ptr []byte) {

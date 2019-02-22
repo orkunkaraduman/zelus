@@ -1,5 +1,33 @@
 package store
 
+import (
+	"reflect"
+	"unsafe"
+)
+
+var (
+	zeroByte   byte
+	typeOfByte = reflect.TypeOf(zeroByte)
+
+	zeroSlot   slot
+	sizeOfSlot = int(unsafe.Sizeof(zeroSlot))
+
+	zeroNode   node
+	typeOfNode = reflect.TypeOf(zeroNode)
+	sizeOfNode = int(unsafe.Sizeof(zeroNode))
+
+	zeroData   []byte
+	typeOfData = reflect.TypeOf(zeroData)
+	sizeOfData = int(unsafe.Sizeof(zeroData))
+)
+
+func toSlice(src interface{}, count int, typ reflect.Type) interface{} {
+	var srcVal, dstVal reflect.Value
+	srcVal = reflect.ValueOf(src)
+	dstVal = reflect.NewAt(reflect.ArrayOf(count, typ), unsafe.Pointer(srcVal.Pointer())).Elem()
+	return dstVal.Slice(0, count).Interface()
+}
+
 func getBKey(key string) []byte {
 	var bKey [256]byte
 	keyLen := len([]byte(key))
