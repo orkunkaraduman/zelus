@@ -64,10 +64,6 @@ func (p *Pool) Close() {
 	p.mu.RUnlock()
 }
 
-func (p *Pool) BlockSize() int {
-	return minLength
-}
-
 func (p *Pool) alloc(size int, block bool) []byte {
 	p.mu.RLock()
 	var ptr []byte

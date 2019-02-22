@@ -78,10 +78,6 @@ func (a *Arena) Close() {
 	}
 }
 
-func (a *Arena) BlockSize() int {
-	return minLength
-}
-
 func (a *Arena) flLock(offset, length int) {
 	for i, j := offset/a.flMuLength, (offset+length-1)/a.flMuLength; i <= j; i++ {
 		a.flMu[i].Lock()

@@ -1,6 +1,12 @@
 package malloc
 
-const minHigh = 4
-const minLength = 1 << minHigh
-const maxHigh = 62
-const maxLength = 1 << maxHigh
+const (
+	minHigh   = 4
+	minLength = 1 << minHigh
+	maxHigh   = 62
+	maxLength = 1 << maxHigh
+)
+
+const (
+	BlockSize = minLength
+)
