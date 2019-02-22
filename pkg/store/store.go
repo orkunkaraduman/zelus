@@ -4,8 +4,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/orkunkaraduman/zelus/pkg/malloc"
 )
 
 type Store struct {
@@ -16,8 +14,8 @@ type Store struct {
 	lhS              int
 	loadFactor       int
 	lfLastKeyCount   int64
-	slotPool         *malloc.Pool
-	dataPool         *malloc.Pool
+	slotPool         MemPool
+	dataPool         MemPool
 	disposerCloseCh  chan struct{}
 	disposerClosedCh chan struct{}
 	stats            StoreStats
@@ -43,17 +41,16 @@ const (
 	updateActionAppend
 )
 
-func New(bucketSize int, loadFactor int, memorySize int) (st *Store) {
-	if bucketSize <= 0 || memorySize <= 0 {
+func New(bucketSize int, loadFactor int, slotPool, dataPool MemPool) (st *Store) {
+	if bucketSize <= 0 {
 		return
 	}
-	p := malloc.AllocPool(memorySize)
 	st = &Store{
 		buckets:          make([][]slot, 0, 64),
 		lhN:              bucketSize,
 		loadFactor:       loadFactor,
-		slotPool:         p,
-		dataPool:         p,
+		slotPool:         slotPool,
+		dataPool:         dataPool,
 		disposerCloseCh:  make(chan struct{}, 1),
 		disposerClosedCh: make(chan struct{}),
 	}
@@ -69,8 +66,6 @@ func (st *Store) Close() {
 	default:
 	}
 	<-st.disposerClosedCh
-	st.slotPool.Close()
-	st.dataPool.Close()
 }
 
 func (st *Store) disposer() {

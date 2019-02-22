@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/orkunkaraduman/zelus/pkg/malloc"
 	"github.com/orkunkaraduman/zelus/pkg/protocol"
 	"github.com/orkunkaraduman/zelus/pkg/server"
 	"github.com/orkunkaraduman/zelus/pkg/store"
@@ -66,7 +67,9 @@ func main() {
 
 	logger.Printf("Allocating %dMiB of memory...\n", ca.Capacity)
 	size := int(ca.Capacity) * 1024 * 1024
-	st := store.New(64*1024, 4, size)
+	mPool := malloc.AllocPool(size)
+	//mPool := &memPool{}
+	st := store.New(64*1024, 4, mPool, mPool)
 	srv := server.New(st)
 
 	logger.Printf("Accepting connections from %s\n", addr)

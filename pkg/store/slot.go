@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"sync"
 	"unsafe"
-
-	"github.com/orkunkaraduman/zelus/pkg/malloc"
 )
 
 type slot struct {
@@ -44,7 +42,7 @@ func (sl *slot) FindNode(keyHash int, bKey []byte) int {
 	return -1
 }
 
-func (sl *slot) NewNode(slotPool *malloc.Pool) int {
+func (sl *slot) NewNode(slotPool MemPool) int {
 	for i := range sl.Nodes {
 		nd := &sl.Nodes[i]
 		if nd.KeyHash < 0 {
@@ -74,7 +72,7 @@ func (sl *slot) NewNode(slotPool *malloc.Pool) int {
 	return idx
 }
 
-func (sl *slot) DelNode(idx int, slotPool *malloc.Pool) {
+func (sl *slot) DelNode(idx int, slotPool MemPool) {
 	nd := &sl.Nodes[idx]
 	nd.KeyHash = -1
 	nd.Datas = nil
@@ -91,7 +89,7 @@ func (sl *slot) DelNode(idx int, slotPool *malloc.Pool) {
 	}
 }
 
-func (sl *slot) FreeNode(idx int, slotPool, dataPool *malloc.Pool) {
+func (sl *slot) FreeNode(idx int, slotPool, dataPool MemPool) {
 	nd := &sl.Nodes[idx]
 	nd.KeyHash = -1
 	nd.Free(slotPool, dataPool)
@@ -117,16 +115,23 @@ type node struct {
 var zeroNode node
 var sizeOfNode = int(unsafe.Sizeof(zeroNode))
 
-func (nd *node) Alloc(slotPool, dataPool *malloc.Pool, size int) bool {
+func (nd *node) Alloc(slotPool, dataPool MemPool, size int) bool {
+	dataBlockSize := dataPool.BlockSize()
 	sz := size
 	if nd.Size > 0 {
-		sz -= malloc.MinLength - (nd.Size-1)%malloc.MinLength - 1
+		sz -= dataBlockSize - (nd.Size-1)%dataBlockSize - 1
 	}
 	var d [256][]byte
 	datas := d[:0]
 	for sz > 0 {
 		var ptr []byte
-		for l := 1 << uint(malloc.HighBit(sz)-1); l >= malloc.MinLength && ptr == nil; l >>= 1 {
+		x, l := sz, 1
+		for x != 0 {
+			x >>= 1
+			l <<= 1
+		}
+		l >>= 1
+		for ; l >= dataBlockSize && ptr == nil; l >>= 1 {
 			ptr = dataPool.AllocBlock(l)
 		}
 		if ptr == nil {
@@ -135,7 +140,7 @@ func (nd *node) Alloc(slotPool, dataPool *malloc.Pool, size int) bool {
 		datas = append(datas, ptr)
 		sz -= len(ptr)
 	}
-	if sz > 0 && sz < malloc.MinLength {
+	if sz > 0 && sz < dataBlockSize {
 		ptr := dataPool.AllocBlock(sz)
 		if ptr != nil {
 			datas = append(datas, ptr)
@@ -189,7 +194,7 @@ func (nd *node) Alloc(slotPool, dataPool *malloc.Pool, size int) bool {
 	return true
 }
 
-func (nd *node) Set(slotPool, dataPool *malloc.Pool, size int) bool {
+func (nd *node) Set(slotPool, dataPool MemPool, size int) bool {
 	if nd.Size == size {
 		return true
 	}
@@ -209,11 +214,12 @@ func (nd *node) Set(slotPool, dataPool *malloc.Pool, size int) bool {
 	return true
 }
 
-func (nd *node) Free(slotPool, dataPool *malloc.Pool) {
+func (nd *node) Free(slotPool, dataPool MemPool) {
 	var zeroData []byte
 	sizeOfData := int(unsafe.Sizeof(zeroData))
-	for _, data := range nd.Datas {
-		dataPool.Free(data)
+	for i := range nd.Datas {
+		dataPool.Free(nd.Datas[i])
+		nd.Datas[i] = nil
 	}
 	if nd.Datas != nil {
 		slotPool.Free((*[^uint32(0) >> 1]byte)(unsafe.Pointer(&nd.Datas[0]))[:len(nd.Datas)*sizeOfData][:])
