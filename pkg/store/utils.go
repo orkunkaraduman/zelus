@@ -3,6 +3,12 @@ package store
 import (
 	"reflect"
 	"unsafe"
+
+	"github.com/orkunkaraduman/zelus/pkg/malloc"
+)
+
+const (
+	blockSize = malloc.BlockSize
 )
 
 var (
@@ -20,6 +26,14 @@ var (
 	typeOfData = reflect.TypeOf(zeroData)
 	sizeOfData = int(unsafe.Sizeof(zeroData))
 )
+
+func allocBlock(p MemPool, size int) []byte {
+	if size <= 0 {
+		return nil
+	}
+	size = blockSize * ((size-1)/blockSize + 1)
+	return p.Alloc(size)
+}
 
 func toSlice(src interface{}, count int, typ reflect.Type) interface{} {
 	var srcVal, dstVal reflect.Value
