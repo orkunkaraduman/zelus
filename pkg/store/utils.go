@@ -27,6 +27,10 @@ var (
 	sizeOfData = int(unsafe.Sizeof(zeroData))
 )
 
+var (
+	NativeAlloc bool
+)
+
 func allocBlock(p MemPool, size int) []byte {
 	if size <= 0 {
 		return nil

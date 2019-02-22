@@ -46,11 +46,16 @@ func (sl *slot) NewNode(slotPool MemPool) int {
 		}
 	}
 	idx := len(sl.Nodes)
-	ptr := allocBlock(slotPool, (idx+1)*sizeOfNode)
-	if ptr == nil {
-		return -1
+	var newNodes []node
+	if !NativeAlloc {
+		ptr := allocBlock(slotPool, (idx+1)*sizeOfNode)
+		if ptr == nil {
+			return -1
+		}
+		newNodes = toSlice(ptr, len(ptr)/sizeOfNode, typeOfNode).([]node)
+	} else {
+		newNodes = make([]node, idx+1)
 	}
-	newNodes := toSlice(ptr, len(ptr)/sizeOfNode, typeOfNode).([]node)
 	for i := range newNodes {
 		if i < idx {
 			newNodes[i] = sl.Nodes[i]
@@ -61,7 +66,7 @@ func (sl *slot) NewNode(slotPool MemPool) int {
 			newNodes[i].Expiry = -1
 		}
 	}
-	if sl.Nodes != nil {
+	if sl.Nodes != nil && !NativeAlloc {
 		slotPool.Free(toSlice(sl.Nodes, len(sl.Nodes)*sizeOfNode, typeOfByte).([]byte))
 	}
 	sl.Nodes = newNodes
@@ -79,10 +84,10 @@ func (sl *slot) DelNode(idx int, slotPool MemPool) {
 			return
 		}
 	}
-	if sl.Nodes != nil {
+	if sl.Nodes != nil && !NativeAlloc {
 		slotPool.Free(toSlice(sl.Nodes, len(sl.Nodes)*sizeOfNode, typeOfByte).([]byte))
-		sl.Nodes = nil
 	}
+	sl.Nodes = nil
 }
 
 func (sl *slot) FreeNode(idx int, slotPool, dataPool MemPool) {
@@ -95,8 +100,8 @@ func (sl *slot) FreeNode(idx int, slotPool, dataPool MemPool) {
 			return
 		}
 	}
-	if sl.Nodes != nil {
+	if sl.Nodes != nil && !NativeAlloc {
 		slotPool.Free(toSlice(sl.Nodes, len(sl.Nodes)*sizeOfNode, typeOfByte).([]byte))
-		sl.Nodes = nil
 	}
+	sl.Nodes = nil
 }

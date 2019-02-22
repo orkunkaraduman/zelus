@@ -23,7 +23,11 @@ func (nd *node) Alloc(slotPool, dataPool MemPool, size int) bool {
 		}
 		l >>= 1
 		for ; l >= blockSize && ptr == nil; l >>= 1 {
-			ptr = allocBlock(dataPool, l)
+			if !NativeAlloc {
+				ptr = allocBlock(dataPool, l)
+			} else {
+				ptr = make([]byte, l)
+			}
 		}
 		if ptr == nil {
 			break
@@ -32,15 +36,22 @@ func (nd *node) Alloc(slotPool, dataPool MemPool, size int) bool {
 		sz -= len(ptr)
 	}
 	if sz > 0 && sz < blockSize {
-		ptr := allocBlock(dataPool, sz)
+		var ptr []byte
+		if !NativeAlloc {
+			ptr = allocBlock(dataPool, sz)
+		} else {
+			ptr = make([]byte, sz)
+		}
 		if ptr != nil {
 			datas = append(datas, ptr)
 			sz -= len(ptr)
 		}
 	}
 	if sz > 0 {
-		for _, ptr := range datas {
-			dataPool.Free(ptr)
+		if !NativeAlloc {
+			for _, ptr := range datas {
+				dataPool.Free(ptr)
+			}
 		}
 		return false
 	}
@@ -51,15 +62,19 @@ func (nd *node) Alloc(slotPool, dataPool MemPool, size int) bool {
 	newDatas := nd.Datas
 	newDatasLen := idx + len(datas)
 	if newDatasLen > len(nd.Datas) {
-		ptr := allocBlock(slotPool, newDatasLen*sizeOfData)
-		if ptr == nil {
-			for _, ptr := range datas {
-				dataPool.Free(ptr)
+		if !NativeAlloc {
+			ptr := allocBlock(slotPool, newDatasLen*sizeOfData)
+			if ptr == nil {
+				for _, ptr := range datas {
+					dataPool.Free(ptr)
+				}
+				return false
 			}
-			return false
+			newDatas = toSlice(ptr, len(ptr)/sizeOfData, typeOfData).([][]byte)
+			newDatasLen = len(newDatas)
+		} else {
+			newDatas = make([][]byte, newDatasLen)
 		}
-		newDatas = toSlice(ptr, len(ptr)/sizeOfData, typeOfData).([][]byte)
-		newDatasLen = len(newDatas)
 		for i := 0; i < idx; i++ {
 			newDatas[i] = nd.Datas[i]
 		}
@@ -75,7 +90,7 @@ func (nd *node) Alloc(slotPool, dataPool MemPool, size int) bool {
 			newDatas[i] = nil
 		}
 	}
-	if nd.Datas != nil && &nd.Datas[0] != &newDatas[0] {
+	if nd.Datas != nil && &nd.Datas[0] != &newDatas[0] && !NativeAlloc {
 		slotPool.Free(toSlice(nd.Datas, len(nd.Datas)*sizeOfData, typeOfByte).([]byte))
 	}
 	nd.Datas = newDatas
@@ -93,7 +108,9 @@ func (nd *node) Set(slotPool, dataPool MemPool, size int) bool {
 	sz := 0
 	for i := range nd.Datas {
 		if sz >= size {
-			dataPool.Free(nd.Datas[i])
+			if !NativeAlloc {
+				dataPool.Free(nd.Datas[i])
+			}
 			nd.Datas[i] = nil
 			continue
 		}
@@ -105,10 +122,12 @@ func (nd *node) Set(slotPool, dataPool MemPool, size int) bool {
 
 func (nd *node) Free(slotPool, dataPool MemPool) {
 	for i := range nd.Datas {
-		dataPool.Free(nd.Datas[i])
+		if !NativeAlloc {
+			dataPool.Free(nd.Datas[i])
+		}
 		nd.Datas[i] = nil
 	}
-	if nd.Datas != nil {
+	if nd.Datas != nil && !NativeAlloc {
 		slotPool.Free(toSlice(nd.Datas, len(nd.Datas)*sizeOfData, typeOfByte).([]byte))
 	}
 	nd.Datas = nil
