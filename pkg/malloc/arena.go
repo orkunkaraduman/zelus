@@ -27,11 +27,11 @@ func NewArena(buf []byte) *Arena {
 	if totalSize <= 0 {
 		return nil
 	}
-	h := HighBit(totalSize - 1)
+	h := highBit(totalSize - 1)
 	if totalSize != 1<<uint(h) {
 		panic(ErrSizeMustBePowerOfTwo)
 	}
-	if h < MinHigh {
+	if h < minHigh {
 		panic(ErrSizeMustBeGEMinLength)
 	}
 	flMuHigh := h - 6
@@ -55,11 +55,11 @@ func AllocArena(totalSize int) *Arena {
 	if totalSize <= 0 {
 		panic(ErrSizeMustBePositive)
 	}
-	h := HighBit(totalSize) - 1
+	h := highBit(totalSize) - 1
 	if totalSize != 1<<uint(h) {
 		panic(ErrSizeMustBePowerOfTwo)
 	}
-	if h < MinHigh {
+	if h < minHigh {
 		panic(ErrSizeMustBeGEMinLength)
 	}
 	pagesize := os.Getpagesize()
@@ -78,6 +78,10 @@ func (a *Arena) Close() {
 	}
 }
 
+func (a *Arena) BlockSize() int {
+	return minLength
+}
+
 func (a *Arena) flLock(offset, length int) {
 	for i, j := offset/a.flMuLength, (offset+length-1)/a.flMuLength; i <= j; i++ {
 		a.flMu[i].Lock()
@@ -94,17 +98,17 @@ func (a *Arena) alloc(size int, block bool) []byte {
 	if size <= 0 {
 		return nil
 	}
-	sizeHigh := HighBit(size - 1)
+	sizeHigh := highBit(size - 1)
 	foundOffset, foundLength, foundHigh := -1, 0, -1
-	offset, length, high := -1, 1<<MinHigh, MinHigh
+	offset, length, high := -1, 1<<minHigh, minHigh
 	if sizeHigh > high {
 		length = 1 << uint(sizeHigh)
 		high = sizeHigh
 	}
 	flLockOffset, flLockLength := -1, -1
-	for foundOffset < 0 && high <= MaxHigh {
+	for foundOffset < 0 && high <= maxHigh {
 		select {
-		case offset = <-a.fl.queue[high-MinHigh]:
+		case offset = <-a.fl.queue[high-minHigh]:
 			h := a.fl.getFree(offset)
 			if h >= high {
 				l := 1 << uint(h)
@@ -132,7 +136,7 @@ func (a *Arena) alloc(size int, block bool) []byte {
 	high = foundHigh
 	starting := foundOffset
 	for offset > starting {
-		if high > sizeHigh && high > MinHigh {
+		if high > sizeHigh && high > minHigh {
 			high--
 			length >>= 1
 		}
@@ -172,9 +176,9 @@ func (a *Arena) Free(ptr []byte) {
 	if ptrOffset < 0 || ptrOffset >= len(a.buf) {
 		return
 	}
-	ptrHigh := HighBit(ptrSize - 1)
-	if ptrHigh < MinHigh {
-		ptrHigh = MinHigh
+	ptrHigh := highBit(ptrSize - 1)
+	if ptrHigh < minHigh {
+		ptrHigh = minHigh
 	}
 	ptrLength := 1 << uint(ptrHigh)
 	offset := ptrOffset

@@ -35,7 +35,7 @@ func (p *Pool) Grow(n int) int {
 		panic(ErrSizeMustBePositive)
 	}
 	pagesize := os.Getpagesize()
-	n = ((n-1)/MinLength + 1) * MinLength
+	n = ((n-1)/minLength + 1) * minLength
 	buf := make([]byte, n)
 	for i, j := 0, len(buf); i < j; i += pagesize {
 		buf[i] = 0
@@ -43,9 +43,9 @@ func (p *Pool) Grow(n int) int {
 	p.mu.Lock()
 	m := 0
 	for n > 0 {
-		length := 1 << uint(HighBit(n)-1)
-		if length < MinLength {
-			length = MinLength
+		length := 1 << uint(highBit(n)-1)
+		if length < minLength {
+			length = minLength
 		}
 		p.arenas = append(p.arenas, NewArena(buf[m:m+length]))
 		m += length
@@ -64,6 +64,10 @@ func (p *Pool) Close() {
 	p.mu.RUnlock()
 }
 
+func (p *Pool) BlockSize() int {
+	return minLength
+}
+
 func (p *Pool) alloc(size int, block bool) []byte {
 	p.mu.RLock()
 	var ptr []byte
@@ -74,7 +78,7 @@ func (p *Pool) alloc(size int, block bool) []byte {
 		}
 		ptr = a.alloc(size, block)
 		if ptr != nil {
-			atomic.AddInt64(&p.stats.AllocatedSize, 1<<uint(HighBit(len(ptr)-1)))
+			atomic.AddInt64(&p.stats.AllocatedSize, 1<<uint(highBit(len(ptr)-1)))
 			atomic.AddInt64(&p.stats.RequestedSize, int64(len(ptr)))
 			break
 		}
@@ -100,7 +104,7 @@ func (p *Pool) Free(ptr []byte) {
 		if uintptr(unsafe.Pointer(&ptr[0])) >= uintptr(unsafe.Pointer(&a.buf[0])) &&
 			uintptr(unsafe.Pointer(&ptr[0])) < uintptr(unsafe.Pointer(&a.buf[0]))+uintptr(len(a.buf)) {
 			a.Free(ptr)
-			atomic.AddInt64(&p.stats.AllocatedSize, -int64(1<<uint(HighBit(len(ptr)-1))))
+			atomic.AddInt64(&p.stats.AllocatedSize, -int64(1<<uint(highBit(len(ptr)-1))))
 			atomic.AddInt64(&p.stats.RequestedSize, -int64(len(ptr)))
 		}
 	}

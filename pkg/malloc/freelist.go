@@ -19,11 +19,11 @@ const (
 )
 
 func newFreeList(size int) *freeList {
-	count := (size-1)/MinLength + 1
+	count := (size-1)/minLength + 1
 	f := &freeList{
 		size:         size,
 		list:         make([]uint8, count, count+4),
-		queue:        make([]chan int, MaxHigh-MinHigh+1),
+		queue:        make([]chan int, maxHigh-minHigh+1),
 		dispatcherCh: make(chan struct{}),
 	}
 	for i := range f.list {
@@ -59,7 +59,7 @@ func (f *freeList) filledSize() int {
 func (f *freeList) dispatcher() {
 	for f.done == 0 {
 		<-f.dispatcherCh
-		offset, length, high := 0, 1<<MinHigh, MinHigh
+		offset, length, high := 0, 1<<minHigh, minHigh
 		for f.done == 0 && offset < f.size {
 			high = f.get(offset)
 			if high < 0 {
@@ -69,7 +69,7 @@ func (f *freeList) dispatcher() {
 			allocated := high&freeListAlloc != 0
 			high &= 0x3f
 			length = 1 << uint(high)
-			c := f.queue[high-MinHigh]
+			c := f.queue[high-minHigh]
 			if !allocated {
 				select {
 				case c <- offset:
@@ -82,7 +82,7 @@ func (f *freeList) dispatcher() {
 }
 
 func (f *freeList) getFree(offset int) int {
-	i := offset / MinLength
+	i := offset / minLength
 	if i >= len(f.list) {
 		return -1
 	}
@@ -94,11 +94,11 @@ func (f *freeList) getFree(offset int) int {
 }
 
 func (f *freeList) setFree(offset int, high int) {
-	i := offset / MinLength
+	i := offset / minLength
 	v := uint8(high & 0x3f)
 	f.list[i] = v
 	select {
-	case f.queue[v-MinHigh] <- offset:
+	case f.queue[v-minHigh] <- offset:
 	default:
 		select {
 		case f.dispatcherCh <- struct{}{}:
@@ -108,7 +108,7 @@ func (f *freeList) setFree(offset int, high int) {
 }
 
 func (f *freeList) getAlloc(offset int) int {
-	i := offset / MinLength
+	i := offset / minLength
 	if i >= len(f.list) {
 		return -1
 	}
@@ -120,13 +120,13 @@ func (f *freeList) getAlloc(offset int) int {
 }
 
 func (f *freeList) setAlloc(offset int, high int) {
-	i := offset / MinLength
+	i := offset / minLength
 	v := uint8(high & 0x3f)
 	f.list[i] = v | freeListAlloc
 }
 
 func (f *freeList) get(offset int) int {
-	i := offset / MinLength
+	i := offset / minLength
 	if i >= len(f.list) {
 		return -1
 	}
@@ -138,6 +138,6 @@ func (f *freeList) get(offset int) int {
 }
 
 func (f *freeList) del(offset int) {
-	i := offset / MinLength
+	i := offset / minLength
 	f.list[i] = 0xff
 }
