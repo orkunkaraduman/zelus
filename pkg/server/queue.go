@@ -113,7 +113,6 @@ func (q *queue) pinger() {
 }
 
 func (q *queue) worker() {
-	maxKeyCount := 128
 	keys := make([]string, 0, maxKeyCount)
 	kvs := make([]keyVal, 0, maxKeyCount)
 	for {

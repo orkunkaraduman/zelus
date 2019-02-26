@@ -18,6 +18,7 @@ type connState struct {
 	srv  *Server
 	conn net.Conn
 	*protocol.Protocol
+	bf *buffer.Buffer
 
 	standalone bool
 	cb         chan interface{}
@@ -42,25 +43,22 @@ const connectRetryCount = 3
 
 func newConnState(srv *Server, conn net.Conn) (cs *connState) {
 	cs = &connState{
-		srv:      srv,
-		conn:     conn,
-		Protocol: protocol.New(conn, conn),
-		cb:       make(chan interface{}, maxKeyCount*maxBackups),
+		srv:        srv,
+		conn:       conn,
+		Protocol:   protocol.New(conn, conn),
+		bf:         buffer.New(),
+		cb:         make(chan interface{}, maxKeyCount*maxRespNodes),
+		respNodes:  make([]wrh.Node, 0, maxRespNodes),
+		respNodes2: make([]wrh.Node, 0, maxRespNodes),
 	}
 	return
 }
 
-func (cs *connState) allocRespNodes() {
+func (cs *connState) setRespNodes() {
 	var u uint
 	u = 1 + cs.srv.nodeBackups
-	if uint(len(cs.respNodes)) < u {
-		cs.respNodes = make([]wrh.Node, u)
-	}
 	cs.respNodes = cs.respNodes[:u]
 	u = 1 + cs.srv.nodeBackups2
-	if uint(len(cs.respNodes2)) < u {
-		cs.respNodes2 = make([]wrh.Node, u)
-	}
 	cs.respNodes2 = cs.respNodes2[:u]
 }
 
@@ -290,13 +288,12 @@ func (cs *connState) cmdClusterReshard() (count int) {
 	cs.srv.clusterState = clusterStateReshard
 	cs.srv.nodesMu.Unlock()
 	cs.srv.nodesMu.RLock()
-	cs.allocRespNodes()
+	cs.setRespNodes()
 	var serr []string
-	bf := buffer.New()
 	var val []byte
 	cs.srv.st.Scan(func(key string, size int, index int, data []byte, expiry int) (cont bool) {
 		if index == 0 {
-			val = bf.Want(size)
+			val = cs.bf.Want(size)
 		}
 		if index+copy(val[index:], data) >= size {
 			wrh.ResponsibleNodes(cs.srv.nodes, []byte(key), cs.respNodes)
@@ -368,7 +365,7 @@ func (cs *connState) cmdClusterClean() (count int) {
 	}
 	cs.srv.nodesMu.Unlock()
 	cs.srv.nodesMu.RLock()
-	cs.allocRespNodes()
+	cs.setRespNodes()
 	cs.srv.st.Scan(func(key string, size int, index int, data []byte, expiry int) (cont bool) {
 		if index+len(data) >= size {
 			wrh.ResponsibleNodes(cs.srv.nodes2, []byte(key), cs.respNodes2)
@@ -436,7 +433,7 @@ func (cs *connState) cmdGet() (count int) {
 		if cs.srv.clusterState == clusterStateNonclustered || cs.standalone {
 			useStore = true
 		} else {
-			cs.allocRespNodes()
+			cs.setRespNodes()
 			wrh.ResponsibleNodes(cs.srv.nodes, []byte(key), cs.respNodes)
 			masterID := wrh.MaxSeed(cs.respNodes)
 			if masterID == cs.srv.nodeID {
@@ -471,11 +468,10 @@ func (cs *connState) cmdGet() (count int) {
 					Val:     val,
 					Expires: expires,
 				}
-				cs.cbLen++
 			} else {
 				cs.cb <- nil
-				cs.cbLen++
 			}
+			cs.cbLen++
 		}
 	}
 	for cs.cbLen > 0 {
@@ -521,7 +517,7 @@ func (cs *connState) cmddataSet(count int, index int, data []byte, expires int) 
 		if cs.srv.clusterState == clusterStateNonclustered || cs.standalone {
 			useStore = true
 		} else {
-			cs.allocRespNodes()
+			cs.setRespNodes()
 			wrh.ResponsibleNodes(cs.srv.nodes, []byte(key), cs.respNodes)
 			masterID := wrh.MaxSeed(cs.respNodes)
 			if masterID == cs.srv.nodeID {
@@ -695,6 +691,7 @@ func (cs *connState) OnReadData(count int, index int, data []byte, expires int) 
 
 func (cs *connState) OnQuit(e error) {
 	defer func() {
+		cs.bf.Close()
 		cs.Flush()
 	}()
 	if e != nil && e != io.EOF {

@@ -37,8 +37,8 @@ const (
 )
 
 const (
-	maxKeyCount = 128
-	maxBackups  = 32
+	maxKeyCount  = 128
+	maxRespNodes = 32
 )
 
 var (
