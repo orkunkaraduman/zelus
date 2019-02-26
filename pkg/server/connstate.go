@@ -45,7 +45,7 @@ func newConnState(srv *Server, conn net.Conn) (cs *connState) {
 		srv:      srv,
 		conn:     conn,
 		Protocol: protocol.New(conn, conn),
-		cb:       make(chan interface{}, 1024),
+		cb:       make(chan interface{}, maxKeyCount*maxBackups),
 	}
 	return
 }

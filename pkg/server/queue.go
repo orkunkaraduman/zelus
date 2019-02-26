@@ -113,16 +113,16 @@ func (q *queue) pinger() {
 }
 
 func (q *queue) worker() {
-	multi := 128
-	keys := make([]string, 0, multi)
-	kvs := make([]keyVal, 0, multi)
+	maxKeyCount := 128
+	keys := make([]string, 0, maxKeyCount)
+	kvs := make([]keyVal, 0, maxKeyCount)
 	for {
 		done := false
 		select {
 		case kv := <-q.qu:
 			l := len(q.qu) + 1
-			if l > multi {
-				l = multi
+			if l > maxKeyCount {
+				l = maxKeyCount
 			}
 			keys = keys[:l]
 			kvs = kvs[:l]

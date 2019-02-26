@@ -36,6 +36,11 @@ const (
 	clusterStateClean
 )
 
+const (
+	maxKeyCount = 128
+	maxBackups  = 32
+)
+
 var (
 	ConnBufferSize = 0
 )
