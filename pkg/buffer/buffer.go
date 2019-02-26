@@ -9,8 +9,8 @@ import (
 type Buffer struct {
 	mu       sync.Mutex
 	data     []byte
-	maxSize  int
 	cancelCh chan struct{}
+	maxSize  int
 }
 
 var (
@@ -19,31 +19,35 @@ var (
 
 func New() (b *Buffer) {
 	b = &Buffer{}
-	b.newData(MinSize)
 	return
 }
 
 func (b *Buffer) Close() {
-	b.cancelCh <- struct{}{}
-	close(b.cancelCh)
 	b.mu.Lock()
 	b.data = nil
-	b.mu.Unlock()
-}
-
-func (b *Buffer) newData(newSize int) {
-	b.data = make([]byte, newSize)
 	if b.cancelCh != nil {
 		close(b.cancelCh)
 	}
-	b.cancelCh = make(chan struct{})
-	go b.disposer(b.cancelCh)
+	b.cancelCh = nil
+	b.mu.Unlock()
 }
 
 func (b *Buffer) Want(size int) (buf []byte) {
+	if size < 0 {
+		return
+	}
 	b.mu.Lock()
-	if len(b.data) < size {
-		b.newData(size * 2)
+	if b.data == nil || len(b.data) < size {
+		newSize := size * 2
+		if newSize < MinSize {
+			newSize = MinSize
+		}
+		b.data = make([]byte, newSize)
+		if b.cancelCh != nil {
+			close(b.cancelCh)
+		}
+		b.cancelCh = make(chan struct{})
+		go b.disposer(b.cancelCh)
 	}
 	buf = b.data[:size]
 	if size > b.maxSize {
@@ -61,12 +65,12 @@ func (b *Buffer) disposer(c chan struct{}) {
 		case <-tk.C:
 			b.mu.Lock()
 			if len(b.data)/4 >= b.maxSize {
-				l := b.maxSize * 2
-				if l < MinSize {
-					l = MinSize
+				newSize := b.maxSize * 2
+				if newSize < MinSize {
+					newSize = MinSize
 				}
-				if len(b.data) > l {
-					b.data = make([]byte, l)
+				if len(b.data) > newSize {
+					b.data = make([]byte, newSize)
 				}
 			}
 			b.maxSize = 0
