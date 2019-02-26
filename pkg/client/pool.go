@@ -8,8 +8,7 @@ import (
 type Pool struct {
 	mu             sync.Mutex
 	max            int
-	clients        map[string]map[int]*Client
-	clientsI       int
+	clients        map[string]map[*Client]struct{}
 	pingerCloseCh  chan struct{}
 	pingerClosedCh chan struct{}
 }
@@ -17,7 +16,7 @@ type Pool struct {
 func NewPool(max int) (p *Pool) {
 	p = &Pool{
 		max:            max,
-		clients:        make(map[string]map[int]*Client, 1024),
+		clients:        make(map[string]map[*Client]struct{}, 1024),
 		pingerCloseCh:  make(chan struct{}, 1),
 		pingerClosedCh: make(chan struct{}),
 	}
@@ -35,7 +34,7 @@ func (p *Pool) pinger() {
 			i := 0
 			c := make(map[int]*Client, 1024*p.max)
 			for _, cls := range p.clients {
-				for _, cl := range cls {
+				for cl := range cls {
 					c[i] = cl
 					i++
 				}
@@ -52,9 +51,9 @@ func (p *Pool) pinger() {
 			}
 			p.mu.Lock()
 			for a, cls := range p.clients {
-				for i, cl := range cls {
+				for cl := range cls {
 					if cl.IsClosed() {
-						delete(cls, i)
+						delete(cls, cl)
 					}
 				}
 				if len(cls) == 0 {
@@ -81,7 +80,7 @@ func (p *Pool) Close() {
 	<-p.pingerClosedCh
 	p.mu.Lock()
 	for _, cls := range p.clients {
-		for _, cl := range cls {
+		for cl := range cls {
 			cl.Close()
 		}
 	}
@@ -96,9 +95,8 @@ func (p *Pool) Get(network, address string) (cl *Client) {
 		p.mu.Unlock()
 		return
 	}
-	for i := range cls {
-		cl = cls[i]
-		delete(cls, i)
+	for cl = range cls {
+		delete(cls, cl)
 		if cl.IsClosed() {
 			cl = nil
 		} else {
@@ -125,11 +123,9 @@ func (p *Pool) Put(cl *Client) {
 		return
 	}
 	if cls == nil {
-		cls = make(map[int]*Client, p.max)
+		cls = make(map[*Client]struct{}, p.max)
 		p.clients[a] = cls
 	}
-	i := p.clientsI
-	p.clientsI++
-	cls[i] = cl
+	cls[cl] = struct{}{}
 	p.mu.Unlock()
 }
