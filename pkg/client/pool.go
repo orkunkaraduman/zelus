@@ -32,15 +32,15 @@ func (p *Pool) pinger() {
 		case <-tk.C:
 			p.mu.Lock()
 			i := 0
-			c := make(map[int]*Client, 1024*p.max)
+			c := make(map[*Client]struct{}, 1024*p.max)
 			for _, cls := range p.clients {
 				for cl := range cls {
-					c[i] = cl
+					c[cl] = struct{}{}
 					i++
 				}
 			}
 			p.mu.Unlock()
-			for _, cl := range c {
+			for cl := range c {
 				if len(p.pingerCloseCh) != 0 {
 					break
 				}
