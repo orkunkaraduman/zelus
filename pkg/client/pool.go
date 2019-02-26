@@ -31,12 +31,10 @@ func (p *Pool) pinger() {
 		select {
 		case <-tk.C:
 			p.mu.Lock()
-			i := 0
 			c := make(map[*Client]struct{}, 1024*p.max)
 			for _, cls := range p.clients {
 				for cl := range cls {
 					c[cl] = struct{}{}
-					i++
 				}
 			}
 			p.mu.Unlock()
