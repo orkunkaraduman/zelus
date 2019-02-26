@@ -46,7 +46,7 @@ func (p *Pool) Get() (bf *Buffer) {
 	return
 }
 
-func (p *Pool) Put(bf *Buffer) (suc bool) {
+func (p *Pool) Put(bf *Buffer) {
 	p.mu.RLock()
 	if p.qu == nil {
 		p.mu.RUnlock()
@@ -54,8 +54,8 @@ func (p *Pool) Put(bf *Buffer) (suc bool) {
 	}
 	select {
 	case p.qu <- bf:
-		suc = true
 	default:
+		bf.Close()
 	}
 	p.mu.RUnlock()
 	return
