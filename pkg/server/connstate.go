@@ -18,7 +18,8 @@ type connState struct {
 	srv  *Server
 	conn net.Conn
 	*protocol.Protocol
-	bf *buffer.Buffer
+	bf  *buffer.Buffer
+	bfs []*buffer.Buffer
 
 	standalone bool
 	cb         chan interface{}
@@ -183,7 +184,6 @@ func (cs *connState) cmdClusterInit() (count int) {
 		cs.srv.nodeQueueGroups[id] = newQueueGroup(addr, connectTimeout, pingTimeout, connectRetryCount, 1024, 1024*1024)
 		args = append(args, strconv.FormatUint(uint64(id), 10), addr)
 	}
-	cs.setRespNodes()
 	cs.srv.nodesMu.Unlock()
 	err = cs.SendCmd(protocol.Cmd{Name: "OK", Args: args})
 	if err != nil {
@@ -274,12 +274,10 @@ func (cs *connState) cmdClusterNoderm() (count int) {
 }
 
 func (cs *connState) cmdClusterReshard() (count int) {
-	cs.srv.reshardMu.Lock()
 	var err error
 	cs.srv.nodesMu.Lock()
 	if cs.srv.clusterState != clusterStateReshardWait {
 		cs.srv.nodesMu.Unlock()
-		cs.srv.reshardMu.Unlock()
 		err = cs.SendCmd(protocol.Cmd{Name: "ERROR", Args: []string{serrCmdClusterInvalidState}})
 		if err != nil {
 			panic(err)
@@ -287,9 +285,9 @@ func (cs *connState) cmdClusterReshard() (count int) {
 		return
 	}
 	cs.srv.clusterState = clusterStateReshard
-	cs.setRespNodes()
 	cs.srv.nodesMu.Unlock()
 	cs.srv.nodesMu.RLock()
+	cs.setRespNodes()
 	var serr []string
 	var val []byte
 	cs.srv.st.Scan(func(key string, size int, index int, data []byte, expiry int) (cont bool) {
@@ -325,14 +323,12 @@ func (cs *connState) cmdClusterReshard() (count int) {
 	})
 	cs.srv.nodesMu.RUnlock()
 	if serr != nil {
-		cs.srv.reshardMu.Unlock()
 		err = cs.SendCmd(protocol.Cmd{Name: "ERROR", Args: serr})
 		if err != nil {
 			panic(err)
 		}
 		return
 	}
-	cs.srv.reshardMu.Unlock()
 	err = cs.SendCmd(protocol.Cmd{Name: "OK"})
 	if err != nil {
 		panic(err)
@@ -364,9 +360,9 @@ func (cs *connState) cmdClusterClean() (count int) {
 			delete(cs.srv.nodeQueueGroups, i)
 		}
 	}
-	cs.setRespNodes()
 	cs.srv.nodesMu.Unlock()
 	cs.srv.nodesMu.RLock()
+	cs.setRespNodes()
 	cs.srv.st.Scan(func(key string, size int, index int, data []byte, expiry int) (cont bool) {
 		if index+len(data) >= size {
 			wrh.ResponsibleNodes(cs.srv.nodes2, []byte(key), cs.respNodes2)
@@ -420,6 +416,7 @@ func (cs *connState) cmdGet() (count int) {
 	if err != nil {
 		panic(err)
 	}
+	cs.bfs = make([]*buffer.Buffer, 0, len(keys))
 	for _, key := range keys {
 		var useStore bool
 		for {
@@ -434,6 +431,7 @@ func (cs *connState) cmdGet() (count int) {
 		if cs.srv.clusterState == clusterStateNonclustered || cs.standalone {
 			useStore = true
 		} else {
+			cs.setRespNodes()
 			wrh.ResponsibleNodes(cs.srv.nodes, []byte(key), cs.respNodes)
 			masterID := wrh.MaxSeed(cs.respNodes)
 			if masterID == cs.srv.nodeID {
@@ -453,11 +451,16 @@ func (cs *connState) cmdGet() (count int) {
 		}
 		cs.srv.nodesMu.RUnlock()
 		if useStore {
+			bf := cs.srv.bfPool.Get()
+			if bf == nil {
+				bf = buffer.New()
+			}
+			cs.bfs = append(cs.bfs, bf)
 			var val []byte
 			var expires int
 			if cs.srv.st.Get(key, func(size int, index int, data []byte, expiry int) (cont bool) {
 				if index == 0 {
-					val = make([]byte, size)
+					val = bf.Want(size)
 					expires = toExpires(expiry)
 				}
 				copy(val[index:], data)
@@ -483,6 +486,10 @@ func (cs *connState) cmdGet() (count int) {
 			err = cs.SendData(nil, -1)
 		}
 	}
+	for _, bf := range cs.bfs {
+		cs.srv.bfPool.Put(bf)
+	}
+	cs.bfs = nil
 	return
 }
 
@@ -496,6 +503,7 @@ func (cs *connState) cmdSet() (count int) {
 	if err != nil {
 		panic(err)
 	}
+	cs.bfs = make([]*buffer.Buffer, 0, count)
 	return
 }
 
@@ -517,6 +525,7 @@ func (cs *connState) cmddataSet(count int, index int, data []byte, expires int) 
 		if cs.srv.clusterState == clusterStateNonclustered || cs.standalone {
 			useStore = true
 		} else {
+			cs.setRespNodes()
 			wrh.ResponsibleNodes(cs.srv.nodes, []byte(key), cs.respNodes)
 			masterID := wrh.MaxSeed(cs.respNodes)
 			if masterID == cs.srv.nodeID {
@@ -527,11 +536,16 @@ func (cs *connState) cmddataSet(count int, index int, data []byte, expires int) 
 					wrh.ResponsibleNodes(cs.srv.nodes2, []byte(key), cs.respNodes2)
 					mergedRespNodes = wrh.MergeNodes(cs.respNodes, cs.respNodes2, make([]wrh.Node, 0, len(cs.respNodes)+len(cs.respNodes2)))
 				}
+				bf := cs.srv.bfPool.Get()
+				if bf == nil {
+					bf = buffer.New()
+				}
+				cs.bfs = append(cs.bfs, bf)
 				var val []byte
 				useStore = true
 				f = func(size int, index int, data []byte, expiry int) (cont bool) {
 					if index == 0 {
-						val = make([]byte, size)
+						val = bf.Want(size)
 					}
 					if index+copy(val[index:], data) >= size {
 						for i, j := 0, len(mergedRespNodes); i < j; i++ {
@@ -605,6 +619,10 @@ func (cs *connState) cmddataSet(count int, index int, data []byte, expires int) 
 			<-cs.cb
 			cs.cbLen--
 		}
+		for _, bf := range cs.bfs {
+			cs.srv.bfPool.Put(bf)
+		}
+		cs.bfs = nil
 		keys := make([]string, 0, len(cs.rCmd.Args))
 		for _, key := range cs.rCmd.Args {
 			if key == "" {

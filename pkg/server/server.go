@@ -8,6 +8,8 @@ import (
 	"sync"
 
 	accepter "github.com/orkunkaraduman/go-accepter"
+
+	"github.com/orkunkaraduman/zelus/pkg/buffer"
 	"github.com/orkunkaraduman/zelus/pkg/store"
 	"github.com/orkunkaraduman/zelus/pkg/wrh"
 )
@@ -24,7 +26,7 @@ type Server struct {
 	nodes           []wrh.Node
 	nodes2          []wrh.Node
 	nodeQueueGroups map[uint32]*queueGroup
-	reshardMu       sync.Mutex
+	bfPool          *buffer.Pool
 }
 
 const (
@@ -51,6 +53,7 @@ func New(st *store.Store) (srv *Server) {
 		ac: &accepter.Accepter{
 			ErrorLog: log.New(os.Stderr, "", log.LstdFlags),
 		},
+		bfPool: buffer.NewPool(maxKeyCount * maxRespNodes),
 	}
 	srv.ac.Handler = accepter.HandlerFunc(srv.serve)
 	return
