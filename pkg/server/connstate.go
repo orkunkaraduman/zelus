@@ -183,6 +183,7 @@ func (cs *connState) cmdClusterInit() (count int) {
 		cs.srv.nodeQueueGroups[id] = newQueueGroup(addr, connectTimeout, pingTimeout, connectRetryCount, 1024, 1024*1024)
 		args = append(args, strconv.FormatUint(uint64(id), 10), addr)
 	}
+	cs.setRespNodes()
 	cs.srv.nodesMu.Unlock()
 	err = cs.SendCmd(protocol.Cmd{Name: "OK", Args: args})
 	if err != nil {
@@ -286,9 +287,9 @@ func (cs *connState) cmdClusterReshard() (count int) {
 		return
 	}
 	cs.srv.clusterState = clusterStateReshard
+	cs.setRespNodes()
 	cs.srv.nodesMu.Unlock()
 	cs.srv.nodesMu.RLock()
-	cs.setRespNodes()
 	var serr []string
 	var val []byte
 	cs.srv.st.Scan(func(key string, size int, index int, data []byte, expiry int) (cont bool) {
@@ -363,9 +364,9 @@ func (cs *connState) cmdClusterClean() (count int) {
 			delete(cs.srv.nodeQueueGroups, i)
 		}
 	}
+	cs.setRespNodes()
 	cs.srv.nodesMu.Unlock()
 	cs.srv.nodesMu.RLock()
-	cs.setRespNodes()
 	cs.srv.st.Scan(func(key string, size int, index int, data []byte, expiry int) (cont bool) {
 		if index+len(data) >= size {
 			wrh.ResponsibleNodes(cs.srv.nodes2, []byte(key), cs.respNodes2)
@@ -433,7 +434,6 @@ func (cs *connState) cmdGet() (count int) {
 		if cs.srv.clusterState == clusterStateNonclustered || cs.standalone {
 			useStore = true
 		} else {
-			cs.setRespNodes()
 			wrh.ResponsibleNodes(cs.srv.nodes, []byte(key), cs.respNodes)
 			masterID := wrh.MaxSeed(cs.respNodes)
 			if masterID == cs.srv.nodeID {
@@ -517,7 +517,6 @@ func (cs *connState) cmddataSet(count int, index int, data []byte, expires int) 
 		if cs.srv.clusterState == clusterStateNonclustered || cs.standalone {
 			useStore = true
 		} else {
-			cs.setRespNodes()
 			wrh.ResponsibleNodes(cs.srv.nodes, []byte(key), cs.respNodes)
 			masterID := wrh.MaxSeed(cs.respNodes)
 			if masterID == cs.srv.nodeID {
