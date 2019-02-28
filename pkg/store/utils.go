@@ -9,6 +9,10 @@ import (
 
 const (
 	blockSize = malloc.BlockSize
+
+	bKeyLenHolderLen = 1
+	maxBKeyLen       = 1 << (bKeyLenHolderLen * 8)
+	maxKeyLen        = maxBKeyLen - bKeyLenHolderLen
 )
 
 var (
@@ -46,15 +50,27 @@ func toSlice(src interface{}, count int, typ reflect.Type) interface{} {
 	return dstVal.Slice(0, count).Interface()
 }
 
-func getBKey(key string) []byte {
-	var bKey [256]byte
-	keyLen := len([]byte(key))
+func getKeyLen(bKey []byte) int {
+	var keyLen int
+	for i, j := 0, 0; i < bKeyLenHolderLen; i++ {
+		keyLen += int(bKey[i]) << uint(j)
+		j += 8
+	}
+	return keyLen
+}
+
+func getBKey(key []byte) []byte {
+	var bKey [maxBKeyLen]byte
+	keyLen := len(key)
 	if keyLen >= len(bKey) {
 		return nil
 	}
-	bKey[0] = byte(keyLen)
-	copy(bKey[1:], []byte(key))
-	return bKey[:keyLen+1]
+	for i, j := 0, keyLen; i < bKeyLenHolderLen; i++ {
+		bKey[i] = byte(j)
+		j >>= 8
+	}
+	copy(bKey[bKeyLenHolderLen:], key)
+	return bKey[:bKeyLenHolderLen+keyLen]
 }
 
 func lhSlotLocation(N, L, S int, h int) (offset, bucketNo, bucketOffset int) {
