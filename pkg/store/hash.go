@@ -6,9 +6,7 @@ import (
 )
 
 func HashFunc(b []byte) (result int) {
-	h := sha256.New()
-	h.Write(b)
-	sum := h.Sum(nil)
+	sum := sha256.Sum256(b)
 	for i := int(unsafe.Sizeof(result)) - 1; i >= 0; i-- {
 		result <<= 8
 		result |= int(sum[i])
