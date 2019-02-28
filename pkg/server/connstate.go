@@ -11,6 +11,7 @@ import (
 
 	"github.com/orkunkaraduman/zelus/pkg/buffer"
 	"github.com/orkunkaraduman/zelus/pkg/protocol"
+	"github.com/orkunkaraduman/zelus/pkg/utils"
 	"github.com/orkunkaraduman/zelus/pkg/wrh"
 )
 
@@ -296,8 +297,9 @@ func (cs *connState) cmdClusterReshard() (count int) {
 			val = cs.bf.Want(size)
 		}
 		if index+copy(val[index:], data) >= size {
-			wrh.ResponsibleNodes(cs.srv.nodes, []byte(key), cs.respNodes)
-			wrh.ResponsibleNodes(cs.srv.nodes2, []byte(key), cs.respNodes2)
+			pkey := utils.StringToByteSlice(key)
+			wrh.ResponsibleNodes(cs.srv.nodes, pkey, cs.respNodes)
+			wrh.ResponsibleNodes(cs.srv.nodes2, pkey, cs.respNodes2)
 			if wrh.MaxSeed(cs.respNodes) == cs.srv.nodeID {
 				for i, j := 0, len(cs.respNodes2); i < j; i++ {
 					id := cs.respNodes2[i].Seed
@@ -366,7 +368,8 @@ func (cs *connState) cmdClusterClean() (count int) {
 	cs.setRespNodes()
 	cs.srv.st.Scan(func(key string, size int, index int, data []byte, expiry int) (cont bool) {
 		if index+len(data) >= size {
-			wrh.ResponsibleNodes(cs.srv.nodes2, []byte(key), cs.respNodes2)
+			pkey := utils.StringToByteSlice(key)
+			wrh.ResponsibleNodes(cs.srv.nodes2, pkey, cs.respNodes2)
 			if wrh.FindSeed(cs.respNodes2, cs.srv.nodeID) < 0 {
 				go cs.srv.st.Del(key)
 			}
@@ -433,7 +436,8 @@ func (cs *connState) cmdGet() (count int) {
 			useStore = true
 		} else {
 			cs.setRespNodes()
-			wrh.ResponsibleNodes(cs.srv.nodes, []byte(key), cs.respNodes)
+			pkey := utils.StringToByteSlice(key)
+			wrh.ResponsibleNodes(cs.srv.nodes, pkey, cs.respNodes)
 			masterID := wrh.MaxSeed(cs.respNodes)
 			if masterID == cs.srv.nodeID {
 				useStore = true
@@ -494,13 +498,13 @@ func (cs *connState) cmdSet() (count int) {
 	var err error
 	count = len(cs.rCmd.Args)
 	if count > 0 {
+		cs.bfs = cs.bfs[:0]
 		return
 	}
 	err = cs.SendCmd(protocol.Cmd{Name: "OK"})
 	if err != nil {
 		panic(err)
 	}
-	cs.bfs = cs.bfs[:0]
 	return
 }
 
@@ -525,14 +529,15 @@ func (cs *connState) cmddataSet(count int, index int, data []byte, expires int) 
 			bf := cs.srv.bfPool.GetOrNew()
 			cs.bfs = append(cs.bfs, bf)
 			cs.setRespNodes()
-			wrh.ResponsibleNodes(cs.srv.nodes, []byte(key), cs.respNodes)
+			pkey := utils.StringToByteSlice(key)
+			wrh.ResponsibleNodes(cs.srv.nodes, pkey, cs.respNodes)
 			masterID := wrh.MaxSeed(cs.respNodes)
 			if masterID == cs.srv.nodeID {
 				var mergedRespNodes []wrh.Node
 				if cs.srv.clusterState != clusterStateReshard {
 					mergedRespNodes = cs.respNodes
 				} else {
-					wrh.ResponsibleNodes(cs.srv.nodes2, []byte(key), cs.respNodes2)
+					wrh.ResponsibleNodes(cs.srv.nodes2, pkey, cs.respNodes2)
 					mergedRespNodes = wrh.MergeNodes(cs.respNodes, cs.respNodes2, make([]wrh.Node, 0, len(cs.respNodes)+len(cs.respNodes2)))
 				}
 				var val []byte
