@@ -39,9 +39,13 @@ Successful Operation Count: %s
 Slot Count: %s
 `
 
-const connectTimeout = 1 * time.Second
-const pingTimeout = 1 * time.Second
-const connectRetryCount = 3
+const (
+	connectTimeout    = 1 * time.Second
+	pingTimeout       = 1 * time.Second
+	connectRetryCount = 3
+	queueGroupMaxLen  = 2560
+	queueGroupMaxSize = 10 * 1024 * 1024
+)
 
 func newConnState(srv *Server, conn net.Conn) (cs *connState) {
 	cs = &connState{
@@ -183,7 +187,7 @@ func (cs *connState) cmdClusterInit() (count int) {
 		}
 		cs.srv.nodes = append(cs.srv.nodes, nd)
 		cs.srv.nodes2 = append(cs.srv.nodes2, nd)
-		cs.srv.nodeQueueGroups[id] = newQueueGroup(addr, connectTimeout, pingTimeout, connectRetryCount, 1024, 1024*1024)
+		cs.srv.nodeQueueGroups[id] = newQueueGroup(addr, connectTimeout, pingTimeout, connectRetryCount, queueGroupMaxLen, queueGroupMaxSize)
 		args = append(args, strconv.FormatUint(uint64(id), 10), addr)
 	}
 	cs.srv.nodesMu.Unlock()
@@ -225,7 +229,7 @@ func (cs *connState) cmdClusterNodeadd() (count int) {
 		}
 		cs.srv.nodes2 = append(cs.srv.nodes2, nd)
 		if _, ok := cs.srv.nodeQueueGroups[id]; !ok {
-			cs.srv.nodeQueueGroups[id] = newQueueGroup(addr, connectTimeout, pingTimeout, connectRetryCount, 1024, 1024*1024)
+			cs.srv.nodeQueueGroups[id] = newQueueGroup(addr, connectTimeout, pingTimeout, connectRetryCount, queueGroupMaxLen, queueGroupMaxSize)
 		} else {
 			cs.srv.nodeQueueGroups[id].remove = false
 		}
@@ -639,6 +643,7 @@ func (cs *connState) cmddataSet(count int, index int, data []byte, expires int) 
 }
 
 func (cs *connState) cmdDel() (count int) {
+	cs.bfs = cs.bfs[:0]
 	cnt := len(cs.rCmd.Args)
 	for index := range cs.rCmd.Args {
 		cs.cmddataSet(cnt, index, nil, -1)
