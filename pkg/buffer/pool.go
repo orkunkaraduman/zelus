@@ -1,6 +1,8 @@
 package buffer
 
-import "sync"
+import (
+	"sync"
+)
 
 type Pool struct {
 	mu sync.RWMutex
@@ -47,6 +49,9 @@ func (p *Pool) Get() (bf *Buffer) {
 }
 
 func (p *Pool) Put(bf *Buffer) {
+	if bf == nil {
+		return
+	}
 	p.mu.RLock()
 	if p.qu == nil {
 		p.mu.RUnlock()
@@ -58,5 +63,13 @@ func (p *Pool) Put(bf *Buffer) {
 		bf.Close()
 	}
 	p.mu.RUnlock()
+	return
+}
+
+func (p *Pool) GetOrNew() (bf *Buffer) {
+	bf = p.Get()
+	if bf == nil {
+		bf = New()
+	}
 	return
 }
