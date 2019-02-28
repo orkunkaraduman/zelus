@@ -5,6 +5,7 @@ import (
 	"unsafe"
 
 	"github.com/orkunkaraduman/zelus/pkg/malloc"
+	"github.com/orkunkaraduman/zelus/pkg/utils"
 )
 
 const (
@@ -46,13 +47,6 @@ func allocBlock(p MemPool, size int) []byte {
 	return p.Alloc(size)
 }
 
-func toSlice(src interface{}, count int, typ reflect.Type) interface{} {
-	var srcVal, dstVal reflect.Value
-	srcVal = reflect.ValueOf(src)
-	dstVal = reflect.NewAt(reflect.ArrayOf(count, typ), unsafe.Pointer(srcVal.Pointer())).Elem()
-	return dstVal.Slice(0, count).Interface()
-}
-
 func getKeyLen(bKey []byte) int {
 	var keyLen int
 	for i, j := 0, 0; i < bKeyLenHolderLen; i++ {
@@ -63,8 +57,7 @@ func getKeyLen(bKey []byte) int {
 }
 
 func getBKey(key string) []byte {
-	//hkey := (*reflect.StringHeader)(unsafe.Pointer(&key))
-	pkey := []byte(key)
+	pkey := utils.StringToByteSlice(key)
 	keyLen := len(pkey)
 	if keyLen > MaxKeyLen {
 		return nil

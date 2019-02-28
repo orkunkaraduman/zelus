@@ -3,6 +3,8 @@ package store
 import (
 	"bytes"
 	"sync"
+
+	"github.com/orkunkaraduman/zelus/pkg/utils"
 )
 
 type slot struct {
@@ -52,7 +54,7 @@ func (sl *slot) NewNode(slotPool MemPool) int {
 		if ptr == nil {
 			return -1
 		}
-		newNodes = toSlice(ptr, len(ptr)/sizeOfNode, typeOfNode).([]node)
+		newNodes = utils.ChangeSliceType(ptr, len(ptr)/sizeOfNode, typeOfNode).([]node)
 	} else {
 		newNodes = make([]node, idx+1)
 	}
@@ -67,7 +69,7 @@ func (sl *slot) NewNode(slotPool MemPool) int {
 		}
 	}
 	if sl.Nodes != nil && !NativeAlloc {
-		slotPool.Free(toSlice(sl.Nodes, len(sl.Nodes)*sizeOfNode, typeOfByte).([]byte))
+		slotPool.Free(utils.ChangeSliceType(sl.Nodes, len(sl.Nodes)*sizeOfNode, typeOfByte).([]byte))
 	}
 	sl.Nodes = newNodes
 	return idx
@@ -85,7 +87,7 @@ func (sl *slot) DelNode(idx int, slotPool MemPool) {
 		}
 	}
 	if sl.Nodes != nil && !NativeAlloc {
-		slotPool.Free(toSlice(sl.Nodes, len(sl.Nodes)*sizeOfNode, typeOfByte).([]byte))
+		slotPool.Free(utils.ChangeSliceType(sl.Nodes, len(sl.Nodes)*sizeOfNode, typeOfByte).([]byte))
 	}
 	sl.Nodes = nil
 }
@@ -101,7 +103,7 @@ func (sl *slot) FreeNode(idx int, slotPool, dataPool MemPool) {
 		}
 	}
 	if sl.Nodes != nil && !NativeAlloc {
-		slotPool.Free(toSlice(sl.Nodes, len(sl.Nodes)*sizeOfNode, typeOfByte).([]byte))
+		slotPool.Free(utils.ChangeSliceType(sl.Nodes, len(sl.Nodes)*sizeOfNode, typeOfByte).([]byte))
 	}
 	sl.Nodes = nil
 }

@@ -1,5 +1,7 @@
 package store
 
+import "github.com/orkunkaraduman/zelus/pkg/utils"
+
 type node struct {
 	KeyHash int
 	Datas   [][]byte
@@ -70,7 +72,7 @@ func (nd *node) Alloc(slotPool, dataPool MemPool, size int) bool {
 				}
 				return false
 			}
-			newDatas = toSlice(ptr, len(ptr)/sizeOfData, typeOfData).([][]byte)
+			newDatas = utils.ChangeSliceType(ptr, len(ptr)/sizeOfData, typeOfData).([][]byte)
 			newDatasLen = len(newDatas)
 		} else {
 			newDatas = make([][]byte, newDatasLen)
@@ -91,7 +93,7 @@ func (nd *node) Alloc(slotPool, dataPool MemPool, size int) bool {
 		}
 	}
 	if nd.Datas != nil && &nd.Datas[0] != &newDatas[0] && !NativeAlloc {
-		slotPool.Free(toSlice(nd.Datas, len(nd.Datas)*sizeOfData, typeOfByte).([]byte))
+		slotPool.Free(utils.ChangeSliceType(nd.Datas, len(nd.Datas)*sizeOfData, typeOfByte).([]byte))
 	}
 	nd.Datas = newDatas
 	nd.Size += size
@@ -128,7 +130,7 @@ func (nd *node) Free(slotPool, dataPool MemPool) {
 		nd.Datas[i] = nil
 	}
 	if nd.Datas != nil && !NativeAlloc {
-		slotPool.Free(toSlice(nd.Datas, len(nd.Datas)*sizeOfData, typeOfByte).([]byte))
+		slotPool.Free(utils.ChangeSliceType(nd.Datas, len(nd.Datas)*sizeOfData, typeOfByte).([]byte))
 	}
 	nd.Datas = nil
 	nd.Size = 0
