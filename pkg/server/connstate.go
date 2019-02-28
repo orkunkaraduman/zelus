@@ -290,13 +290,13 @@ func (cs *connState) cmdClusterReshard() (count int) {
 	cs.setRespNodes()
 	var serr []string
 	var val []byte
-	cs.srv.st.Scan(func(key string, size int, index int, data []byte, expiry int) (cont bool) {
+	cs.srv.st.Scan(func(key []byte, size int, index int, data []byte, expiry int) (cont bool) {
 		if index == 0 {
 			val = cs.bf.Want(size)
 		}
 		if index+copy(val[index:], data) >= size {
-			wrh.ResponsibleNodes(cs.srv.nodes, []byte(key), cs.respNodes)
-			wrh.ResponsibleNodes(cs.srv.nodes2, []byte(key), cs.respNodes2)
+			wrh.ResponsibleNodes(cs.srv.nodes, key, cs.respNodes)
+			wrh.ResponsibleNodes(cs.srv.nodes2, key, cs.respNodes2)
 			if wrh.MaxSeed(cs.respNodes) == cs.srv.nodeID {
 				for i, j := 0, len(cs.respNodes2); i < j; i++ {
 					id := cs.respNodes2[i].Seed
@@ -305,7 +305,7 @@ func (cs *connState) cmdClusterReshard() (count int) {
 					}
 					q := cs.srv.nodeQueueGroups[id]
 					kv := keyVal{
-						Key:      key,
+						Key:      string(key),
 						Val:      val,
 						Expires:  toExpires(expiry),
 						CallBack: cs.cb,
@@ -363,9 +363,9 @@ func (cs *connState) cmdClusterClean() (count int) {
 	cs.srv.nodesMu.Unlock()
 	cs.srv.nodesMu.RLock()
 	cs.setRespNodes()
-	cs.srv.st.Scan(func(key string, size int, index int, data []byte, expiry int) (cont bool) {
+	cs.srv.st.Scan(func(key []byte, size int, index int, data []byte, expiry int) (cont bool) {
 		if index+len(data) >= size {
-			wrh.ResponsibleNodes(cs.srv.nodes2, []byte(key), cs.respNodes2)
+			wrh.ResponsibleNodes(cs.srv.nodes2, key, cs.respNodes2)
 			if wrh.FindSeed(cs.respNodes2, cs.srv.nodeID) < 0 {
 				go cs.srv.st.Del(key)
 			}
@@ -458,7 +458,7 @@ func (cs *connState) cmdGet() (count int) {
 			cs.bfs = append(cs.bfs, bf)
 			var val []byte
 			var expires int
-			if cs.srv.st.Get(key, func(size int, index int, data []byte, expiry int) (cont bool) {
+			if cs.srv.st.Get([]byte(key), func(size int, index int, data []byte, expiry int) (cont bool) {
 				if index == 0 {
 					val = bf.Want(size)
 					expires = toExpires(expiry)
@@ -595,19 +595,19 @@ func (cs *connState) cmddataSet(count int, index int, data []byte, expires int) 
 			expiry := toExpiry(expires)
 			switch cs.rCmd.Name {
 			case "SET":
-				if !cs.srv.st.Set(key, data, expiry, f) {
+				if !cs.srv.st.Set([]byte(key), data, expiry, f) {
 					cs.rCmd.Args[index] = ""
 				}
 			case "PUT":
-				if !cs.srv.st.Put(key, data, expiry, f) {
+				if !cs.srv.st.Put([]byte(key), data, expiry, f) {
 					cs.rCmd.Args[index] = ""
 				}
 			case "APPEND":
-				if !cs.srv.st.Append(key, data, expiry, f) {
+				if !cs.srv.st.Append([]byte(key), data, expiry, f) {
 					cs.rCmd.Args[index] = ""
 				}
 			case "DEL":
-				if !cs.srv.st.Set(key, data, expiry, f) {
+				if !cs.srv.st.Set([]byte(key), data, expiry, f) {
 					cs.rCmd.Args[index] = ""
 				}
 			}
