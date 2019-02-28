@@ -48,6 +48,7 @@ func newConnState(srv *Server, conn net.Conn) (cs *connState) {
 		conn:       conn,
 		Protocol:   protocol.New(conn, conn),
 		bf:         buffer.New(),
+		bfs:        make([]*buffer.Buffer, 0, maxKeyCount*maxRespNodes),
 		cb:         make(chan interface{}, maxKeyCount*maxRespNodes),
 		respNodes:  make([]wrh.Node, 0, maxRespNodes),
 		respNodes2: make([]wrh.Node, 0, maxRespNodes),
@@ -416,7 +417,7 @@ func (cs *connState) cmdGet() (count int) {
 	if err != nil {
 		panic(err)
 	}
-	cs.bfs = make([]*buffer.Buffer, 0, len(keys))
+	cs.bfs = cs.bfs[:0]
 	for _, key := range keys {
 		var useStore bool
 		for {
@@ -451,10 +452,7 @@ func (cs *connState) cmdGet() (count int) {
 		}
 		cs.srv.nodesMu.RUnlock()
 		if useStore {
-			bf := cs.srv.bfPool.Get()
-			if bf == nil {
-				bf = buffer.New()
-			}
+			bf := cs.srv.bfPool.GetOrNew()
 			cs.bfs = append(cs.bfs, bf)
 			var val []byte
 			var expires int
@@ -489,7 +487,6 @@ func (cs *connState) cmdGet() (count int) {
 	for _, bf := range cs.bfs {
 		cs.srv.bfPool.Put(bf)
 	}
-	cs.bfs = nil
 	return
 }
 
@@ -503,7 +500,7 @@ func (cs *connState) cmdSet() (count int) {
 	if err != nil {
 		panic(err)
 	}
-	cs.bfs = make([]*buffer.Buffer, 0, count)
+	cs.bfs = cs.bfs[:0]
 	return
 }
 
@@ -525,6 +522,8 @@ func (cs *connState) cmddataSet(count int, index int, data []byte, expires int) 
 		if cs.srv.clusterState == clusterStateNonclustered || cs.standalone {
 			useStore = true
 		} else {
+			bf := cs.srv.bfPool.GetOrNew()
+			cs.bfs = append(cs.bfs, bf)
 			cs.setRespNodes()
 			wrh.ResponsibleNodes(cs.srv.nodes, []byte(key), cs.respNodes)
 			masterID := wrh.MaxSeed(cs.respNodes)
@@ -536,11 +535,6 @@ func (cs *connState) cmddataSet(count int, index int, data []byte, expires int) 
 					wrh.ResponsibleNodes(cs.srv.nodes2, []byte(key), cs.respNodes2)
 					mergedRespNodes = wrh.MergeNodes(cs.respNodes, cs.respNodes2, make([]wrh.Node, 0, len(cs.respNodes)+len(cs.respNodes2)))
 				}
-				bf := cs.srv.bfPool.Get()
-				if bf == nil {
-					bf = buffer.New()
-				}
-				cs.bfs = append(cs.bfs, bf)
 				var val []byte
 				useStore = true
 				f = func(size int, index int, data []byte, expiry int) (cont bool) {
@@ -567,11 +561,13 @@ func (cs *connState) cmddataSet(count int, index int, data []byte, expires int) 
 					return true
 				}
 			} else {
+				val := bf.Want(len(data))
+				copy(val, data)
 				id := masterID
 				q := cs.srv.nodeQueueGroups[id]
 				kv := keyVal{
 					Key:      key,
-					Val:      data,
+					Val:      val,
 					Expires:  expires,
 					CallBack: cs.cb,
 				}
@@ -622,7 +618,6 @@ func (cs *connState) cmddataSet(count int, index int, data []byte, expires int) 
 		for _, bf := range cs.bfs {
 			cs.srv.bfPool.Put(bf)
 		}
-		cs.bfs = nil
 		keys := make([]string, 0, len(cs.rCmd.Args))
 		for _, key := range cs.rCmd.Args {
 			if key == "" {
