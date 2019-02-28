@@ -30,7 +30,7 @@ type StoreStats struct {
 	SlotCount     int64
 }
 
-type ScanFunc func(key []byte, size int, index int, data []byte, expiry int) (cont bool)
+type ScanFunc func(key string, size int, index int, data []byte, expiry int) (cont bool)
 type GetFunc func(size int, index int, data []byte, expiry int) (cont bool)
 
 type updateAction int
@@ -257,7 +257,7 @@ func (st *Store) Scan(f ScanFunc) (cont bool) {
 					keyLen := getKeyLen(nd.Datas[0])
 					bKeyLen := keyLen + bKeyLenHolderLen
 					bKey = bKey[:bKeyLen]
-					key := []byte(nil)
+					key := ""
 					m, p := 0, bKeyLen
 					valIdx, valLen := 0, nd.Size-p
 					for index := 0; valIdx < valLen; index++ {
@@ -267,15 +267,14 @@ func (st *Store) Scan(f ScanFunc) (cont bool) {
 							if r > p {
 								r = p
 							}
-							bKey = bKey[:m+r]
-							copy(bKey[m:], data[n:n+r])
+							copy(bKey[m:m+r], data[n:n+r])
 							m += r
 							n += r
 							p -= r
 						}
 						if p == 0 {
-							if key == nil {
-								key = bKey[bKeyLenHolderLen : bKeyLenHolderLen+keyLen]
+							if key == "" {
+								key = string(bKey[bKeyLenHolderLen : bKeyLenHolderLen+keyLen])
 							}
 							d := data[n:]
 							cont = f(key, valLen, valIdx, d, nd.Expiry)
@@ -300,7 +299,7 @@ func (st *Store) Scan(f ScanFunc) (cont bool) {
 	return
 }
 
-func (st *Store) Get(key []byte, f GetFunc) bool {
+func (st *Store) Get(key string, f GetFunc) bool {
 	atomic.AddInt64(&st.stats.ReqOperCount, 1)
 	bKey := getBKey(key)
 	if bKey == nil {
@@ -352,7 +351,7 @@ func (st *Store) Get(key []byte, f GetFunc) bool {
 	return true
 }
 
-func (st *Store) write(key []byte, val []byte, ua updateAction, expiry int, f GetFunc) bool {
+func (st *Store) write(key string, val []byte, ua updateAction, expiry int, f GetFunc) bool {
 	atomic.AddInt64(&st.stats.ReqOperCount, 1)
 	bKey := getBKey(key)
 	if bKey == nil {
@@ -470,19 +469,19 @@ func (st *Store) write(key []byte, val []byte, ua updateAction, expiry int, f Ge
 	return true
 }
 
-func (st *Store) Set(key []byte, val []byte, expiry int, f GetFunc) bool {
+func (st *Store) Set(key string, val []byte, expiry int, f GetFunc) bool {
 	return st.write(key, val, updateActionReplace, expiry, f)
 }
 
-func (st *Store) Put(key []byte, val []byte, expiry int, f GetFunc) bool {
+func (st *Store) Put(key string, val []byte, expiry int, f GetFunc) bool {
 	return st.write(key, val, updateActionNone, expiry, f)
 }
 
-func (st *Store) Append(key []byte, val []byte, expiry int, f GetFunc) bool {
+func (st *Store) Append(key string, val []byte, expiry int, f GetFunc) bool {
 	return st.write(key, val, updateActionAppend, expiry, f)
 }
 
-func (st *Store) Del(key []byte) bool {
+func (st *Store) Del(key string) bool {
 	atomic.AddInt64(&st.stats.ReqOperCount, 1)
 	bKey := getBKey(key)
 	bKeyLen := len(bKey)

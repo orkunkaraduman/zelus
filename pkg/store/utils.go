@@ -12,7 +12,10 @@ const (
 
 	bKeyLenHolderLen = 1
 	maxBKeyLen       = 1 << (bKeyLenHolderLen * 8)
-	maxKeyLen        = maxBKeyLen - bKeyLenHolderLen
+)
+
+const (
+	MaxKeyLen = maxBKeyLen - bKeyLenHolderLen
 )
 
 var (
@@ -59,18 +62,20 @@ func getKeyLen(bKey []byte) int {
 	return keyLen
 }
 
-func getBKey(key []byte) []byte {
-	var bKey [maxBKeyLen]byte
-	keyLen := len(key)
-	if keyLen >= len(bKey) {
+func getBKey(key string) []byte {
+	//hkey := (*reflect.StringHeader)(unsafe.Pointer(&key))
+	pkey := []byte(key)
+	keyLen := len(pkey)
+	if keyLen > MaxKeyLen {
 		return nil
 	}
+	bKey := make([]byte, bKeyLenHolderLen+keyLen)
 	for i, j := 0, keyLen; i < bKeyLenHolderLen; i++ {
 		bKey[i] = byte(j)
 		j >>= 8
 	}
-	copy(bKey[bKeyLenHolderLen:], key)
-	return bKey[:bKeyLenHolderLen+keyLen]
+	copy(bKey[bKeyLenHolderLen:], pkey)
+	return bKey
 }
 
 func lhSlotLocation(N, L, S int, h int) (offset, bucketNo, bucketOffset int) {
