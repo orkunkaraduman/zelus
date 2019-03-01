@@ -454,7 +454,7 @@ func (cs *connState) cmdGet() (count int) {
 					Expires:  -1,
 					CallBack: cs.cb,
 				}
-				q.nodeGetQueue.Add(kv)
+				q.masterGetQueue.Add(kv)
 				cs.cbLen++
 			}
 		}

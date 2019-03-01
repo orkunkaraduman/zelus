@@ -11,7 +11,7 @@ import (
 
 type queue struct {
 	mu                          sync.RWMutex
-	addr                        string
+	address                     string
 	connectTimeout, pingTimeout time.Duration
 	connectRetryCount           int
 	maxLen, maxSize             int
@@ -26,10 +26,10 @@ type queue struct {
 	workerClosedCh              chan struct{}
 }
 
-func newQueue(addr string, connectTimeout, pingTimeout time.Duration, connectRetryCount int, maxLen, maxSize int,
+func newQueue(address string, connectTimeout, pingTimeout time.Duration, connectRetryCount int, maxLen, maxSize int,
 	cmdName string, standalone bool) (q *queue) {
 	q = &queue{
-		addr:              addr,
+		address:           address,
 		connectTimeout:    connectTimeout,
 		pingTimeout:       pingTimeout,
 		connectRetryCount: connectRetryCount,
@@ -78,7 +78,7 @@ func (q *queue) checkClient() (err error) {
 	}
 	err = errors.New("client closed")
 	for i := 0; err != nil && i < q.connectRetryCount; i++ {
-		q.cl, err = client.New("tcp", q.addr, q.connectTimeout, q.pingTimeout)
+		q.cl, err = client.New("tcp", q.address, q.connectTimeout, q.pingTimeout)
 	}
 	if err == nil && q.standalone {
 		err = q.cl.Standalone()
