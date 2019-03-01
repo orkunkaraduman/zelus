@@ -19,7 +19,6 @@ type connState struct {
 	srv  *Server
 	conn net.Conn
 	*protocol.Protocol
-	bf  *buffer.Buffer
 	bfs []*buffer.Buffer
 
 	standalone bool
@@ -52,7 +51,6 @@ func newConnState(srv *Server, conn net.Conn) (cs *connState) {
 		srv:        srv,
 		conn:       conn,
 		Protocol:   protocol.New(conn, conn),
-		bf:         buffer.New(),
 		bfs:        make([]*buffer.Buffer, 0, maxKeyCount*maxRespNodes),
 		cb:         make(chan interface{}, maxKeyCount*maxRespNodes),
 		respNodes:  make([]wrh.Node, 0, maxRespNodes),
@@ -292,13 +290,14 @@ func (cs *connState) cmdClusterReshard() (count int) {
 	}
 	cs.srv.clusterState = clusterStateReshard
 	cs.srv.nodesMu.Unlock()
+	bf := cs.srv.bfPool.GetOrNew()
 	cs.srv.nodesMu.RLock()
 	cs.setRespNodes()
 	var serr []string
 	var val []byte
 	cs.srv.st.Scan(func(key string, size int, index int, data []byte, expiry int) (cont bool) {
 		if index == 0 {
-			val = cs.bf.Want(size)
+			val = bf.Want(size)
 		}
 		if index+copy(val[index:], data) >= size {
 			pkey := utils.StringToByteSlice(key)
@@ -329,6 +328,7 @@ func (cs *connState) cmdClusterReshard() (count int) {
 		return true
 	})
 	cs.srv.nodesMu.RUnlock()
+	cs.srv.bfPool.Put(bf)
 	if serr != nil {
 		err = cs.SendCmd(protocol.Cmd{Name: "ERROR", Args: serr})
 		if err != nil {
@@ -713,7 +713,6 @@ func (cs *connState) OnReadData(count int, index int, data []byte, expires int) 
 
 func (cs *connState) OnQuit(e error) {
 	defer func() {
-		cs.bf.Close()
 		cs.Flush()
 	}()
 	if e != nil && e != io.EOF {
