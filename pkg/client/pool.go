@@ -76,10 +76,10 @@ func (p *Pool) Put(cl *Client) {
 	return
 }
 
-func (p *Pool) GetOrNew(network, address string, connectTimeout, pingTimeout time.Duration) (cl *Client) {
+func (p *Pool) GetOrNew(network, address string, connectTimeout, pingTimeout time.Duration) (cl *Client, err error) {
 	cl = p.Get()
 	if cl == nil {
-		cl, _ = New(network, address, connectTimeout, pingTimeout)
+		cl, err = New(network, address, connectTimeout, pingTimeout)
 	}
 	return
 }
@@ -91,9 +91,11 @@ func (p *Pool) pinger() {
 		select {
 		case <-tk.C:
 			cl := p.Get()
-			cl.Ping()
-			if !cl.IsClosed() {
-				p.Put(cl)
+			if cl != nil {
+				cl.Ping()
+				if !cl.IsClosed() {
+					p.Put(cl)
+				}
 			}
 		case <-p.pingerCloseCh:
 			done = true
