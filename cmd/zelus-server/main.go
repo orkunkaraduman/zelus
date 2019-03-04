@@ -66,11 +66,11 @@ func main() {
 	}
 
 	logger.Printf("Allocating %dMiB of memory...\n", ca.Capacity)
-	size := int(ca.Capacity) * 1024 * 1024
-	mPool := malloc.AllocPool(size)
+	memPool := malloc.AllocPool(int(ca.Capacity) * 1024 * 1024)
+	//memPool := &nativeMemPool{}
 	//mPool := store.MemPool(nil)
 	//store.NativeAlloc = true
-	st := store.New(64*1024, 4, mPool, mPool)
+	st := store.New(64*1024, 4, memPool, memPool)
 	srv := server.New(st)
 
 	logger.Printf("Accepting connections from %s\n", addr)
