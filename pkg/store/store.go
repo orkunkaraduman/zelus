@@ -395,6 +395,9 @@ func (st *Store) write(key string, val []byte, ua updateAction, expiry int, f Ge
 		if val == nil {
 			atomic.AddInt64(&st.stats.KeyCount, -1)
 			sl.FreeNode(ndIdx, st.slotPool, st.dataPool)
+			if f != nil {
+				f(-1, 0, nil, -1)
+			}
 			sl.Mu.Unlock()
 			st.bucketsMu.RUnlock()
 			atomic.AddInt64(&st.stats.SucOperCount, 1)
