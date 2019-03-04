@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"runtime"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
@@ -19,13 +20,12 @@ type connState struct {
 	srv  *Server
 	conn net.Conn
 	*protocol.Protocol
-	bfs []*buffer.Buffer
-
-	standalone bool
+	bfs        []*buffer.Buffer
 	cb         chan interface{}
 	cbLen      int
 	respNodes  []wrh.Node
 	respNodes2 []wrh.Node
+	standalone bool
 
 	rCmd protocol.Cmd
 }
@@ -446,6 +446,8 @@ func (cs *connState) cmdGet() (count int) {
 			if masterID == cs.srv.nodeID {
 				useStore = true
 			} else {
+				bf := cs.srv.bfPool.GetOrNew()
+				cs.bfs = append(cs.bfs, bf)
 				id := masterID
 				q := cs.srv.nodeQueueGroups[id]
 				kv := keyVal{
@@ -453,6 +455,7 @@ func (cs *connState) cmdGet() (count int) {
 					Val:      nil,
 					Expires:  -1,
 					CallBack: cs.cb,
+					UserData: bf,
 				}
 				q.masterGetQueue.Add(kv)
 				cs.cbLen++
@@ -460,10 +463,10 @@ func (cs *connState) cmdGet() (count int) {
 		}
 		cs.srv.nodesMu.RUnlock()
 		if useStore {
-			bf := cs.srv.bfPool.GetOrNew()
-			cs.bfs = append(cs.bfs, bf)
 			var val []byte
 			var expires int
+			bf := cs.srv.bfPool.GetOrNew()
+			cs.bfs = append(cs.bfs, bf)
 			if cs.srv.st.Get(key, func(size int, index int, data []byte, expiry int) (cont bool) {
 				if index == 0 {
 					val = bf.Want(size)
@@ -484,9 +487,9 @@ func (cs *connState) cmdGet() (count int) {
 		}
 	}
 	for cs.cbLen > 0 {
-		cb := <-cs.cb
+		result := <-cs.cb
 		cs.cbLen--
-		if kv, ok := cb.(keyVal); ok {
+		if kv, ok := result.(keyVal); ok {
 			err = cs.SendData(kv.Val, kv.Expires)
 		} else {
 			err = cs.SendData(nil, -1)
@@ -530,8 +533,6 @@ func (cs *connState) cmddataSet(count int, index int, data []byte, expires int) 
 		if cs.srv.clusterState == clusterStateNonclustered || cs.standalone {
 			useStore = true
 		} else {
-			bf := cs.srv.bfPool.GetOrNew()
-			cs.bfs = append(cs.bfs, bf)
 			cs.setRespNodes()
 			pkey := utils.StringToByteSlice(key)
 			wrh.ResponsibleNodes(cs.srv.nodes, pkey, cs.respNodes)
@@ -545,12 +546,14 @@ func (cs *connState) cmddataSet(count int, index int, data []byte, expires int) 
 					mergedRespNodes = wrh.MergeNodes(cs.respNodes, cs.respNodes2, make([]wrh.Node, 0, len(cs.respNodes)+len(cs.respNodes2)))
 				}
 				var val []byte
+				bf := cs.srv.bfPool.GetOrNew()
+				cs.bfs = append(cs.bfs, bf)
 				useStore = true
 				f = func(size int, index int, data []byte, expiry int) (cont bool) {
 					if index == 0 {
 						val = bf.Want(size)
 					}
-					if index+copy(val[index:], data) >= size {
+					if data == nil || index+copy(val[index:], data) >= size {
 						for i, j := 0, len(mergedRespNodes); i < j; i++ {
 							id := mergedRespNodes[i].Seed
 							if id == cs.srv.nodeID {
@@ -570,8 +573,13 @@ func (cs *connState) cmddataSet(count int, index int, data []byte, expires int) 
 					return true
 				}
 			} else {
-				val := bf.Want(len(data))
-				copy(val, data)
+				var val []byte
+				if data != nil {
+					bf := cs.srv.bfPool.GetOrNew()
+					cs.bfs = append(cs.bfs, bf)
+					val = bf.Want(len(data))
+					copy(val, data)
+				}
 				id := masterID
 				q := cs.srv.nodeQueueGroups[id]
 				kv := keyVal{
@@ -715,13 +723,15 @@ func (cs *connState) OnQuit(e error) {
 	defer func() {
 		cs.Flush()
 	}()
-	if e != nil && e != io.EOF {
+	if _, ok := e.(net.Error); !ok && e != nil && e != io.EOF {
 		cmd := protocol.Cmd{Name: "FATAL"}
 		if e, ok := e.(*protocol.Error); ok {
 			cmd.Args = append(cmd.Args, e.Err.Error())
 			if e.Err == ErrProtocolUnexpectedCommand {
 				cmd.Args = append(cmd.Args, e.Cmd.Name)
 			}
+		} else {
+			debug.PrintStack()
 		}
 		cs.SendCmd(cmd)
 		return
