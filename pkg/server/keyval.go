@@ -5,4 +5,5 @@ type keyVal struct {
 	Val      []byte
 	Expires  int
 	CallBack chan interface{}
+	UserData interface{}
 }

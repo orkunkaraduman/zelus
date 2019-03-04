@@ -6,20 +6,23 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/orkunkaraduman/zelus/pkg/buffer"
 	"github.com/orkunkaraduman/zelus/pkg/client"
 )
 
 type queue struct {
-	mu                          sync.RWMutex
 	address                     string
 	connectTimeout, pingTimeout time.Duration
 	connectRetryCount           int
 	maxLen, maxSize             int
 	cmdName                     string
 	standalone                  bool
-	clPool                      *client.Pool
+	clMu                        sync.RWMutex
+	cl                          *client.Client
 	qu                          chan keyVal
 	quSize                      int64
+	pingerCloseCh               chan struct{}
+	pingerClosedCh              chan struct{}
 	workerCloseCh               chan struct{}
 	workerClosedCh              chan struct{}
 }
@@ -35,6 +38,8 @@ func newQueue(address string, connectTimeout, pingTimeout time.Duration, connect
 		maxSize:           maxSize,
 		cmdName:           cmdName,
 		standalone:        standalone,
+		pingerCloseCh:     make(chan struct{}, 1),
+		pingerClosedCh:    make(chan struct{}),
 		workerCloseCh:     make(chan struct{}, 1),
 		workerClosedCh:    make(chan struct{}),
 	}
@@ -44,37 +49,65 @@ func newQueue(address string, connectTimeout, pingTimeout time.Duration, connect
 	if q.maxSize < 0 {
 		q.maxSize = 0
 	}
-	if standalone {
-		q.clPool = client.NewPool(1, pingTimeout*10)
-	} else {
-		q.clPool = client.NewPool(maxKeyCount, pingTimeout*10)
-	}
 	q.qu = make(chan keyVal, q.maxLen)
+	go q.pinger()
 	go q.worker()
 	return
 }
 
 func (q *queue) Close() {
 	select {
+	case q.pingerCloseCh <- struct{}{}:
+	default:
+	}
+	<-q.pingerClosedCh
+	select {
 	case q.workerCloseCh <- struct{}{}:
 	default:
 	}
 	<-q.workerClosedCh
-	q.clPool.Close()
+	if q.cl != nil {
+		q.cl.Close()
+	}
 }
 
-func (q *queue) getClient() (cl *client.Client, err error) {
+func (q *queue) checkClient() (err error) {
+	if q.cl != nil && !q.cl.IsClosed() {
+		return
+	}
 	err = errors.New("client closed")
 	for i := 0; err != nil && i < q.connectRetryCount; i++ {
-		cl, err = q.clPool.GetOrNew("tcp", q.address, q.connectTimeout, q.pingTimeout)
+		q.cl, err = client.New("tcp", q.address, q.connectTimeout, q.pingTimeout)
 	}
 	if err == nil && q.standalone {
-		err = cl.Standalone()
+		err = q.cl.Standalone()
 	}
 	if err != nil {
-		cl = nil
+		q.cl = nil
 	}
 	return
+}
+
+func (q *queue) pinger() {
+	tk := time.NewTicker(10 * q.pingTimeout)
+	for {
+		done := false
+		select {
+		case <-tk.C:
+			q.clMu.RLock()
+			if q.cl != nil {
+				q.cl.Ping()
+			}
+			q.clMu.RUnlock()
+		case <-q.pingerCloseCh:
+			done = true
+		}
+		if done {
+			break
+		}
+	}
+	tk.Stop()
+	close(q.pingerClosedCh)
 }
 
 func (q *queue) worker() {
@@ -97,16 +130,21 @@ func (q *queue) worker() {
 				keys[i] = kv.Key
 				kvs[i] = kv
 			}
-			cl, e := q.getClient()
+			q.clMu.Lock()
+			e := q.checkClient()
 			if e == nil {
 				var k []string
 				switch q.cmdName {
 				case "GET":
 					k = make([]string, 0, len(keys))
-					e = cl.Get(keys, func(index int, key string, val []byte, expires int) {
+					e = q.cl.Get(keys, func(index int, key string, val []byte, expires int) {
 						if val != nil {
 							k = append(k, key)
-							kvs[index].Val = make([]byte, len(val))
+							if bf, ok := kvs[index].UserData.(*buffer.Buffer); ok {
+								kvs[index].Val = bf.Want(len(val))
+							} else {
+								kvs[index].Val = make([]byte, len(val))
+							}
 							copy(kvs[index].Val, val)
 						} else {
 							kvs[index].Val = nil
@@ -114,26 +152,26 @@ func (q *queue) worker() {
 						kvs[index].Expires = expires
 					})
 				case "SET":
-					k, e = cl.Set(keys, func(index int, key string) (val []byte, expires int) {
+					k, e = q.cl.Set(keys, func(index int, key string) (val []byte, expires int) {
 						return kvs[index].Val, kvs[index].Expires
 					})
 				case "PUT":
-					k, e = cl.Put(keys, func(index int, key string) (val []byte, expires int) {
+					k, e = q.cl.Put(keys, func(index int, key string) (val []byte, expires int) {
 						return kvs[index].Val, kvs[index].Expires
 					})
 				case "APPEND":
-					k, e = cl.Append(keys, func(index int, key string) (val []byte, expires int) {
+					k, e = q.cl.Append(keys, func(index int, key string) (val []byte, expires int) {
 						return kvs[index].Val, kvs[index].Expires
 					})
 				default:
 					e = errors.New("unexpected command")
 				}
-				q.clPool.Put(cl)
 				if e == nil {
 					i, j := 0, len(k)
 					for idx := range kvs {
 						if i >= j || k[i] != kvs[idx].Key {
 							q.remove(kvs[idx], nil)
+							kvs[idx].Val = nil
 							continue
 						}
 						q.remove(kvs[idx], kvs[idx])
@@ -142,9 +180,11 @@ func (q *queue) worker() {
 					}
 				}
 			}
+			q.clMu.Unlock()
 			if e != nil {
 				for _, kv := range kvs {
 					q.remove(kv, e)
+					kv.Val = nil
 				}
 			}
 		case <-q.workerCloseCh:
@@ -157,10 +197,10 @@ func (q *queue) worker() {
 	close(q.workerClosedCh)
 }
 
-func (sq *queue) remove(kv keyVal, cb interface{}) {
+func (sq *queue) remove(kv keyVal, result interface{}) {
 	atomic.AddInt64(&sq.quSize, int64(-len(kv.Val)))
 	if kv.CallBack != nil {
-		kv.CallBack <- cb
+		kv.CallBack <- result
 	}
 }
 
