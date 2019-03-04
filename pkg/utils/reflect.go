@@ -18,7 +18,7 @@ func ChangeSliceType(src interface{}, count int, typ reflect.Type) interface{} {
 }
 
 func StringToByteSlice(s string) []byte {
-	sh := *(*reflect.StringHeader)(unsafe.Pointer(&s))
-	bVal := reflect.NewAt(reflect.ArrayOf(sh.Len, typeOfByte), unsafe.Pointer(sh.Data)).Elem()
-	return bVal.Slice(0, sh.Len).Interface().([]byte)
+	n := (*reflect.StringHeader)(unsafe.Pointer(&s)).Len
+	bVal := reflect.NewAt(reflect.ArrayOf(n, typeOfByte), unsafe.Pointer((*reflect.StringHeader)(unsafe.Pointer(&s)).Data)).Elem()
+	return bVal.Slice(0, n).Interface().([]byte)
 }
