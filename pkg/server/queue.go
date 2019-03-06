@@ -17,8 +17,8 @@ type queue struct {
 	maxLen, maxSize             int
 	cmdName                     string
 	standalone                  bool
-	clMu                        sync.RWMutex
 	cl                          *client.Client
+	clMu                        sync.RWMutex
 	qu                          chan keyVal
 	quSize                      int64
 	pingerCloseCh               chan struct{}
