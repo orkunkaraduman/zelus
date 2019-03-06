@@ -7,10 +7,7 @@ import (
 )
 
 func TestDynListWithHeap(t *testing.T) {
-	lf := func(x, y interface{}) bool {
-		return x.(int) < y.(int)
-	}
-	dl := New(1, lf)
+	dl := New(1, LessFuncInt)
 	heap.Init(dl)
 
 	rnd := rand.New(rand.NewSource(1))
