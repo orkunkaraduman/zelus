@@ -12,7 +12,7 @@ func TestDynListWithHeap(t *testing.T) {
 
 	rnd := rand.New(rand.NewSource(1))
 
-	valueCount := 1000000
+	valueCount := 100000
 	for i := 0; i < valueCount; i++ {
 		heap.Push(dl, rnd.Int())
 	}

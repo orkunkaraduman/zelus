@@ -7,7 +7,7 @@ type DynList struct {
 }
 
 func New(n int, lf LessFunc) (dl *DynList) {
-	if n <= 0 {
+	if n <= 0 || lf == nil {
 		return
 	}
 	dl = &DynList{
@@ -39,7 +39,15 @@ func (dl *DynList) Len() int {
 func (dl *DynList) Less(i, j int) bool {
 	bucketNo1, bucketOffset1 := dl.location(i)
 	bucketNo2, bucketOffset2 := dl.location(j)
-	return dl.lf(dl.buckets[bucketNo1][bucketOffset1], dl.buckets[bucketNo2][bucketOffset2])
+	x, y := dl.buckets[bucketNo1][bucketOffset1], dl.buckets[bucketNo2][bucketOffset2]
+	if x != nil {
+		if y == nil {
+			return true
+		}
+	} else {
+		return false
+	}
+	return dl.lf(x, y)
 }
 
 func (dl *DynList) Swap(i, j int) {
