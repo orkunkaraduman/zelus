@@ -93,3 +93,36 @@ func TestList1(t *testing.T) {
 		t.FailNow()
 	}
 }
+
+func benchmarkListPush(b *testing.B, n int) {
+	rnd := rand.New(rand.NewSource(1))
+	sl := NewList(dynlist.LessFuncInt)
+	rnds := make([]interface{}, 0, b.N)
+	for i := 0; i < b.N; i++ {
+		rnds = append(rnds, rnd.Intn(1000))
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; {
+		l := b.N
+		if l-i > n {
+			l = i + n
+		}
+		sl.Push(rnds[i:l]...)
+		i = l
+	}
+	if sl.Len() != b.N {
+		b.FailNow()
+	}
+}
+
+func BenchmarkListPush(b *testing.B) {
+	benchmarkListPush(b, 1)
+}
+
+func BenchmarkListPush16(b *testing.B) {
+	benchmarkListPush(b, 16)
+}
+
+func BenchmarkListPush256(b *testing.B) {
+	benchmarkListPush(b, 256)
+}
