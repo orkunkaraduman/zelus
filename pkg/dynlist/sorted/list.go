@@ -78,5 +78,9 @@ func (sl *List) Search(start int, x interface{}) int {
 	if !(i >= 0 && i < n) {
 		return -1
 	}
-	return start + i
+	i += start
+	if sl.Get(i) != x {
+		return -1
+	}
+	return i
 }

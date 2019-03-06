@@ -59,6 +59,18 @@ func TestList1(t *testing.T) {
 	if idx != i+1 {
 		t.FailNow()
 	}
+	idx = sl.Search(0, -200)
+	if idx != -1 {
+		t.FailNow()
+	}
+	idx = sl.Search(0, 200)
+	if idx != -1 {
+		t.FailNow()
+	}
+	idx = sl.Search(50, -200)
+	if idx != -1 {
+		t.FailNow()
+	}
 	idx = sl.Search(50, 200)
 	if idx != -1 {
 		t.FailNow()
