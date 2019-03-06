@@ -1,4 +1,4 @@
-package sortedlist
+package sorted
 
 import (
 	"math/rand"
@@ -7,11 +7,11 @@ import (
 	"github.com/orkunkaraduman/zelus/pkg/dynlist"
 )
 
-func TestSortedList1(t *testing.T) {
+func TestList1(t *testing.T) {
 	valueCount := 100
 	rnd := rand.New(rand.NewSource(1))
 	rMin, rMax := -100, +100
-	sl := New(dynlist.LessFuncInt)
+	sl := NewList(dynlist.LessFuncInt)
 	for i := 0; i < valueCount; i++ {
 		sl.Push(rMin + rnd.Intn(rMax-rMin+1))
 	}
@@ -23,7 +23,7 @@ func TestSortedList1(t *testing.T) {
 	for i := 0; i < cap(idxs); i++ {
 		idxs = append(idxs, rnd.Intn(valueCount))
 	}
-	valueCount -= sl.Del(idxs...)
+	valueCount -= sl.Remove(idxs...)
 	if sl.Len() != valueCount {
 		t.FailNow()
 	}
@@ -60,6 +60,10 @@ func TestSortedList1(t *testing.T) {
 		t.FailNow()
 	}
 	idx = sl.Search(50, 200)
+	if idx != -1 {
+		t.FailNow()
+	}
+	idx = sl.Search(50, nil)
 	if idx != -1 {
 		t.FailNow()
 	}
