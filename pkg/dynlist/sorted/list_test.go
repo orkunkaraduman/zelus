@@ -116,6 +116,10 @@ func benchmarkListPush(b *testing.B, n int) {
 }
 
 func BenchmarkListPush(b *testing.B) {
+	benchmarkListPush(b, b.N)
+}
+
+func BenchmarkListPush1(b *testing.B) {
 	benchmarkListPush(b, 1)
 }
 

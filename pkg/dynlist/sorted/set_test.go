@@ -41,6 +41,10 @@ func benchmarkSetPush(b *testing.B, n int) {
 }
 
 func BenchmarkSetPush(b *testing.B) {
+	benchmarkSetPush(b, b.N)
+}
+
+func BenchmarkSetPush1(b *testing.B) {
 	benchmarkSetPush(b, 1)
 }
 
