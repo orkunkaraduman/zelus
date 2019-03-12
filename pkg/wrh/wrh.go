@@ -47,14 +47,16 @@ func FindSeed(nodes []Node, seed uint32) int {
 	return -1
 }
 
-func MaxSeed(nodes []Node) uint32 {
-	max := uint32(0)
+func MaxScore(nodes []Node) uint32 {
+	var result uint32
+	var max float64
 	for i, j := 0, len(nodes); i < j; i++ {
-		if nodes[i].Seed > max {
-			max = nodes[i].Seed
+		if nodes[i].score > max {
+			result = nodes[i].Seed
+			max = nodes[i].score
 		}
 	}
-	return max
+	return result
 }
 
 func MergeNodes(nodes1, nodes2 []Node, mergedNodesIn []Node) (mergedNodes []Node) {
