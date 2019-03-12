@@ -393,16 +393,17 @@ func (st *Store) write(key string, val []byte, ua updateAction, expiry int, f Ge
 			atomic.AddInt64(&st.stats.DataspaceSize, -int64(nd.Size-bKeyLen))
 		}
 		if val == nil {
+			result := foundNdIdx >= 0
 			atomic.AddInt64(&st.stats.KeyCount, -1)
 			sl.FreeNode(ndIdx, st.slotPool, st.dataPool)
-			if f != nil {
+			if result && f != nil {
 				f(-1, 0, nil, -1)
 			}
 			sl.Mu.Unlock()
 			st.bucketsMu.RUnlock()
 			atomic.AddInt64(&st.stats.SucOperCount, 1)
 			st.fixLoadFactor()
-			return true
+			return result
 		}
 		if !nd.Set(st.slotPool, st.dataPool, bKeyLen+valLen) {
 			if foundNdIdx < 0 {
