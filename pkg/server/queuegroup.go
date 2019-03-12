@@ -4,8 +4,8 @@ import "time"
 
 type queueGroup struct {
 	addr              string
+	nodeGetQueue      *queue
 	nodeSetQueue      *queue
-	masterGetQueue    *queue
 	masterSetQueue    *queue
 	masterPutQueue    *queue
 	masterAppendQueue *queue
@@ -15,8 +15,8 @@ type queueGroup struct {
 func newQueueGroup(addr string, connectTimeout, pingTimeout time.Duration, connectRetryCount int, maxLen, maxSize int) (q *queueGroup) {
 	q = &queueGroup{
 		addr:              addr,
+		nodeGetQueue:      newQueue(addr, connectTimeout, pingTimeout, connectRetryCount, maxLen, maxSize, "GET", true),
 		nodeSetQueue:      newQueue(addr, connectTimeout, pingTimeout, connectRetryCount, maxLen, maxSize, "SET", true),
-		masterGetQueue:    newQueue(addr, connectTimeout, pingTimeout, connectRetryCount, maxLen, maxSize, "GET", false),
 		masterSetQueue:    newQueue(addr, connectTimeout, pingTimeout, connectRetryCount, maxLen, maxSize, "SET", false),
 		masterPutQueue:    newQueue(addr, connectTimeout, pingTimeout, connectRetryCount, maxLen, maxSize, "PUT", false),
 		masterAppendQueue: newQueue(addr, connectTimeout, pingTimeout, connectRetryCount, maxLen, maxSize, "APPEND", false),
@@ -25,7 +25,7 @@ func newQueueGroup(addr string, connectTimeout, pingTimeout time.Duration, conne
 }
 
 func (q *queueGroup) Close() {
-	q.masterGetQueue.Close()
+	q.nodeGetQueue.Close()
 	q.nodeSetQueue.Close()
 	q.masterSetQueue.Close()
 	q.masterPutQueue.Close()

@@ -303,19 +303,20 @@ func (cs *connState) cmdClusterReshard() (count int) {
 			pkey := utils.StringToByteSlice(key)
 			wrh.ResponsibleNodes(cs.srv.nodes, pkey, cs.respNodes)
 			wrh.ResponsibleNodes(cs.srv.nodes2, pkey, cs.respNodes2)
-			if wrh.MaxSeed(cs.respNodes) == cs.srv.nodeID {
+			masterID := wrh.MaxScore(cs.respNodes)
+			if cs.srv.nodeID == masterID {
+				kv := keyVal{
+					Key:      key,
+					Val:      val,
+					Expires:  toExpires(expiry),
+					CallBack: cs.cb,
+				}
 				for i, j := 0, len(cs.respNodes2); i < j; i++ {
 					id := cs.respNodes2[i].Seed
-					if id == cs.srv.nodeID {
+					if cs.srv.nodeID == id {
 						continue
 					}
 					q := cs.srv.nodeQueueGroups[id]
-					kv := keyVal{
-						Key:      key,
-						Val:      val,
-						Expires:  toExpires(expiry),
-						CallBack: cs.cb,
-					}
 					q.nodeSetQueue.Add(kv)
 					e, _ := (<-cs.cb).(error)
 					if e != nil {
@@ -413,19 +414,17 @@ func (cs *connState) cmdClusterWait() (count int) {
 
 func (cs *connState) cmdGet() (count int) {
 	var err error
-	keys := make([]string, 0, len(cs.rCmd.Args))
 	for _, key := range cs.rCmd.Args {
 		if key == "" {
+			cs.cb <- keyVal{
+				Key:      key,
+				Val:      nil,
+				Expires:  -1,
+				CallBack: cs.cb,
+			}
+			cs.cbLen++
 			continue
 		}
-		keys = append(keys, key)
-	}
-	err = cs.SendCmd(protocol.Cmd{Name: "OK", Args: keys})
-	if err != nil {
-		panic(err)
-	}
-	cs.bfs = cs.bfs[:0]
-	for _, key := range keys {
 		var useStore bool
 		for {
 			cs.srv.nodesMu.RLock()
@@ -442,22 +441,20 @@ func (cs *connState) cmdGet() (count int) {
 			cs.setRespNodes()
 			pkey := utils.StringToByteSlice(key)
 			wrh.ResponsibleNodes(cs.srv.nodes, pkey, cs.respNodes)
-			masterID := wrh.MaxSeed(cs.respNodes)
-			if masterID == cs.srv.nodeID {
+			masterID := wrh.MaxScore(cs.respNodes)
+			if cs.srv.nodeID == masterID {
 				useStore = true
 			} else {
 				bf := cs.srv.bfPool.GetOrNew()
 				cs.bfs = append(cs.bfs, bf)
-				id := masterID
-				q := cs.srv.nodeQueueGroups[id]
-				kv := keyVal{
+				q := cs.srv.nodeQueueGroups[masterID]
+				q.nodeGetQueue.Add(keyVal{
 					Key:      key,
 					Val:      nil,
 					Expires:  -1,
 					CallBack: cs.cb,
 					UserData: bf,
-				}
-				q.masterGetQueue.Add(kv)
+				})
 				cs.cbLen++
 			}
 		}
@@ -476,27 +473,56 @@ func (cs *connState) cmdGet() (count int) {
 				return
 			}) {
 				cs.cb <- keyVal{
-					Key:     key,
-					Val:     val,
-					Expires: expires,
+					Key:      key,
+					Val:      val,
+					Expires:  expires,
+					CallBack: cs.cb,
 				}
+				cs.cbLen++
 			} else {
-				cs.cb <- nil
+				cs.cb <- keyVal{
+					Key:      key,
+					Val:      nil,
+					Expires:  -1,
+					CallBack: cs.cb,
+				}
+				cs.cbLen++
 			}
-			cs.cbLen++
 		}
 	}
+	results := make(map[string]keyVal, len(cs.rCmd.Args))
 	for cs.cbLen > 0 {
-		result := <-cs.cb
+		if kv, ok := (<-cs.cb).(keyVal); ok {
+			if _, ok := kv.UserData.(error); !ok {
+				if _, ok := results[kv.Key]; !ok {
+					results[kv.Key] = kv
+				}
+			}
+		}
 		cs.cbLen--
-		if kv, ok := result.(keyVal); ok {
+	}
+	keys := make([]string, 0, len(cs.rCmd.Args))
+	for _, key := range cs.rCmd.Args {
+		if _, ok := results[key]; ok {
+			keys = append(keys, key)
+		}
+	}
+	err = cs.SendCmd(protocol.Cmd{Name: "OK", Args: keys})
+	if err == nil {
+		for _, key := range keys {
+			kv := results[key]
 			err = cs.SendData(kv.Val, kv.Expires)
-		} else {
-			err = cs.SendData(nil, -1)
+			if err != nil {
+				break
+			}
 		}
 	}
 	for _, bf := range cs.bfs {
 		cs.srv.bfPool.Put(bf)
+	}
+	cs.bfs = cs.bfs[:0]
+	if err != nil {
+		panic(err)
 	}
 	return
 }
@@ -505,7 +531,6 @@ func (cs *connState) cmdSet() (count int) {
 	var err error
 	count = len(cs.rCmd.Args)
 	if count > 0 {
-		cs.bfs = cs.bfs[:0]
 		return
 	}
 	err = cs.SendCmd(protocol.Cmd{Name: "OK"})
@@ -531,13 +556,32 @@ func (cs *connState) cmddataSet(count int, index int, data []byte, expires int) 
 			}
 		}
 		if cs.srv.clusterState == clusterStateNonclustered || cs.standalone {
+			var val []byte
+			bf := cs.srv.bfPool.GetOrNew()
+			cs.bfs = append(cs.bfs, bf)
 			useStore = true
+			f = func(size int, index int, data []byte, expiry int) (cont bool) {
+				if index == 0 {
+					val = bf.Want(size)
+				}
+				if data == nil || index+copy(val[index:], data) >= size {
+					kv := keyVal{
+						Key:      key,
+						Val:      val,
+						Expires:  expires,
+						CallBack: cs.cb,
+					}
+					cs.cb <- kv
+					cs.cbLen++
+				}
+				return true
+			}
 		} else {
 			cs.setRespNodes()
 			pkey := utils.StringToByteSlice(key)
 			wrh.ResponsibleNodes(cs.srv.nodes, pkey, cs.respNodes)
-			masterID := wrh.MaxSeed(cs.respNodes)
-			if masterID == cs.srv.nodeID {
+			masterID := wrh.MaxScore(cs.respNodes)
+			if cs.srv.nodeID == masterID {
 				var mergedRespNodes []wrh.Node
 				if cs.srv.clusterState != clusterStateReshard {
 					mergedRespNodes = cs.respNodes
@@ -554,18 +598,20 @@ func (cs *connState) cmddataSet(count int, index int, data []byte, expires int) 
 						val = bf.Want(size)
 					}
 					if data == nil || index+copy(val[index:], data) >= size {
+						kv := keyVal{
+							Key:      key,
+							Val:      val,
+							Expires:  expires,
+							CallBack: cs.cb,
+						}
+						cs.cb <- kv
+						cs.cbLen++
 						for i, j := 0, len(mergedRespNodes); i < j; i++ {
 							id := mergedRespNodes[i].Seed
-							if id == cs.srv.nodeID {
+							if cs.srv.nodeID == id {
 								continue
 							}
 							q := cs.srv.nodeQueueGroups[id]
-							kv := keyVal{
-								Key:      key,
-								Val:      val,
-								Expires:  expires,
-								CallBack: cs.cb,
-							}
 							q.nodeSetQueue.Add(kv)
 							cs.cbLen++
 						}
@@ -580,14 +626,13 @@ func (cs *connState) cmddataSet(count int, index int, data []byte, expires int) 
 					val = bf.Want(len(data))
 					copy(val, data)
 				}
-				id := masterID
-				q := cs.srv.nodeQueueGroups[id]
 				kv := keyVal{
 					Key:      key,
 					Val:      val,
 					Expires:  expires,
 					CallBack: cs.cb,
 				}
+				q := cs.srv.nodeQueueGroups[masterID]
 				switch cs.rCmd.Name {
 				case "SET":
 					q.masterSetQueue.Add(kv)
@@ -605,44 +650,53 @@ func (cs *connState) cmddataSet(count int, index int, data []byte, expires int) 
 			}
 		}
 		if useStore {
+			var result bool
 			expiry := toExpiry(expires)
 			switch cs.rCmd.Name {
 			case "SET":
-				if !cs.srv.st.Set(key, data, expiry, f) {
-					cs.rCmd.Args[index] = ""
-				}
+				result = cs.srv.st.Set(key, data, expiry, f)
 			case "PUT":
-				if !cs.srv.st.Put(key, data, expiry, f) {
-					cs.rCmd.Args[index] = ""
-				}
+				result = cs.srv.st.Put(key, data, expiry, f)
 			case "APPEND":
-				if !cs.srv.st.Append(key, data, expiry, f) {
-					cs.rCmd.Args[index] = ""
-				}
+				result = cs.srv.st.Append(key, data, expiry, f)
 			case "DEL":
-				if !cs.srv.st.Set(key, data, expiry, f) {
-					cs.rCmd.Args[index] = ""
-				}
+				result = cs.srv.st.Set(key, data, expiry, f)
 			}
+			runtime.KeepAlive(result)
 		}
 		cs.srv.nodesMu.RUnlock()
 	}
 	if index+1 >= count {
+		results := make(map[string]int, len(cs.rCmd.Args))
 		for cs.cbLen > 0 {
-			<-cs.cb
+			if kv, ok := (<-cs.cb).(keyVal); ok {
+				if _, ok := kv.UserData.(error); !ok {
+					if _, ok := results[kv.Key]; !ok {
+						results[kv.Key] = 0
+					}
+				} else {
+					if _, ok := results[kv.Key]; ok {
+						results[kv.Key]++
+					}
+				}
+			}
 			cs.cbLen--
 		}
 		for _, bf := range cs.bfs {
 			cs.srv.bfPool.Put(bf)
 		}
+		cs.bfs = cs.bfs[:0]
+		cmdName := "OK"
 		keys := make([]string, 0, len(cs.rCmd.Args))
 		for _, key := range cs.rCmd.Args {
-			if key == "" {
-				continue
+			if errCount, ok := results[key]; ok {
+				keys = append(keys, key)
+				if errCount != 0 {
+					cmdName = "WARN"
+				}
 			}
-			keys = append(keys, key)
 		}
-		err = cs.SendCmd(protocol.Cmd{Name: "OK", Args: keys})
+		err = cs.SendCmd(protocol.Cmd{Name: cmdName, Args: keys})
 		if err != nil {
 			panic(err)
 		}
@@ -651,7 +705,6 @@ func (cs *connState) cmddataSet(count int, index int, data []byte, expires int) 
 }
 
 func (cs *connState) cmdDel() (count int) {
-	cs.bfs = cs.bfs[:0]
 	cnt := len(cs.rCmd.Args)
 	for index := range cs.rCmd.Args {
 		cs.cmddataSet(cnt, index, nil, -1)

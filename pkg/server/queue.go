@@ -27,6 +27,11 @@ type queue struct {
 	workerClosedCh              chan struct{}
 }
 
+var (
+	errQueueUnexpectedCommand = errors.New("unexpected command")
+	errQueueNotFound          = errors.New("not found")
+)
+
 func newQueue(address string, connectTimeout, pingTimeout time.Duration, connectRetryCount int, maxLen, maxSize int,
 	cmdName string, standalone bool) (q *queue) {
 	q = &queue{
@@ -164,17 +169,19 @@ func (q *queue) worker() {
 						return kvs[index].Val, kvs[index].Expires
 					})
 				default:
-					e = errors.New("unexpected command")
+					e = errQueueUnexpectedCommand
 				}
 				if e == nil {
 					i, j := 0, len(k)
 					for idx := range kvs {
 						if i >= j || k[i] != kvs[idx].Key {
-							q.remove(kvs[idx], nil)
+							kvs[idx].UserData = errQueueNotFound
+							q.remove(kvs[idx])
 							kvs[idx].Val = nil
 							continue
 						}
-						q.remove(kvs[idx], kvs[idx])
+						kvs[idx].UserData = nil
+						q.remove(kvs[idx])
 						kvs[idx].Val = nil
 						i++
 					}
@@ -182,9 +189,10 @@ func (q *queue) worker() {
 			}
 			q.clMu.Unlock()
 			if e != nil {
-				for _, kv := range kvs {
-					q.remove(kv, e)
-					kv.Val = nil
+				for idx := range kvs {
+					kvs[idx].UserData = e
+					q.remove(kvs[idx])
+					kvs[idx].Val = nil
 				}
 			}
 		case <-q.workerCloseCh:
@@ -197,10 +205,10 @@ func (q *queue) worker() {
 	close(q.workerClosedCh)
 }
 
-func (sq *queue) remove(kv keyVal, result interface{}) {
+func (sq *queue) remove(kv keyVal) {
 	atomic.AddInt64(&sq.quSize, int64(-len(kv.Val)))
 	if kv.CallBack != nil {
-		kv.CallBack <- result
+		kv.CallBack <- kv
 	}
 }
 
