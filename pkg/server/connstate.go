@@ -12,6 +12,7 @@ import (
 
 	"github.com/orkunkaraduman/zelus/pkg/buffer"
 	"github.com/orkunkaraduman/zelus/pkg/protocol"
+	"github.com/orkunkaraduman/zelus/pkg/store"
 	"github.com/orkunkaraduman/zelus/pkg/utils"
 	"github.com/orkunkaraduman/zelus/pkg/wrh"
 )
@@ -545,7 +546,7 @@ func (cs *connState) cmddataSet(count int, index int, data []byte, expires int) 
 	key := cs.rCmd.Args[index]
 	if key != "" {
 		var useStore bool
-		var f func(size int, index int, data []byte, expiry int) (cont bool)
+		var f store.GetFunc
 		for {
 			cs.srv.nodesMu.RLock()
 			if cs.srv.clusterState == clusterStateReshardWait || cs.srv.clusterState == clusterStateCleanWait {
