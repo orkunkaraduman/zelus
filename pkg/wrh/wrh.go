@@ -2,6 +2,7 @@ package wrh
 
 import (
 	"math"
+	"sort"
 
 	"github.com/spaolacci/murmur3"
 )
@@ -17,7 +18,7 @@ func ResponsibleNodes(nodes []Node, key []byte, respNodes []Node) bool {
 	if count <= 0 {
 		return false
 	}
-	for i := 0; i < count; i++ {
+	for i := range respNodes {
 		respNodes[i] = Node{}
 	}
 	for i := 0; i < len(nodes); i++ {
@@ -35,6 +36,9 @@ func ResponsibleNodes(nodes []Node, key []byte, respNodes []Node) bool {
 			respNodes[k].score = sc
 		}
 	}
+	var ni nodesIfc
+	ni.nodes = respNodes
+	sort.Sort(&ni)
 	return true
 }
 
