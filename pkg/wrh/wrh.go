@@ -36,9 +36,8 @@ func ResponsibleNodes(nodes []Node, key []byte, respNodes []Node) bool {
 			respNodes[k].score = sc
 		}
 	}
-	var ni nodesIfc
-	ni.nodes = respNodes
-	sort.Sort(&ni)
+	ni := &nodesIfc{nodes: respNodes}
+	sort.Sort(ni)
 	return true
 }
 
